@@ -23,8 +23,8 @@ warnings.filterwarnings('ignore', module='openpyxl')
 # PCs are running the same version — instead of grepping the source or, worse,
 # discovering a stale PC only when a fixed bug reappears on one area. Format:
 # YYYY.MM.DD[.n] date-based; the trailing note is just a human label.
-BUILD_VERSION = '2026.07.30.7'
-BUILD_NOTE    = 'ticket/label printing: BPT packaging ticket + Zebra box label (dummy LP), print-and-queue-on-station, print settings'
+BUILD_VERSION = '2026.07.30.8'
+BUILD_NOTE    = 'printing: strict per-market packing standard (fixes box split), silent Canon path, blocking print-result dialog'
 
 # ── Dev / test mode ─────────────────────────────────────────────────────────────
 # When ON, the board:
@@ -3455,7 +3455,28 @@ def _print_settings_defaults():
         'zebra_printer': 'ZDesigner ZT421-300dpi ZPL',
         'canon_printer': r'\\10.191.56.14\vtn1prt-tanglung',
         'email_recipients': list(_EMAIL_DEFAULT),
+        # Silent BPT paper path: render with headless Edge/Chrome, then push the
+        # PDF to the named Canon queue with SumatraPDF. Blank paths = auto-detect.
+        # If either piece is missing the board falls back to the browser tab.
+        'silent_bpt': True,
+        'sumatra_path': '',
+        'browser_path': '',
+        # Packaging materials charged per PALLET rather than per box, by code
+        # prefix. Kept as settings so a new prefix is a config change, not a
+        # code change (the business chose prefixes over a packaging_type table).
+        'pallet_prefixes': list(_bpt_defaults()[0]),
+        'crate_prefixes': list(_bpt_defaults()[1]),
     }
+
+def _bpt_defaults():
+    """(pallet_prefixes, crate_prefixes) from bpt.py, without importing it at
+    module scope (bpt pulls in openpyxl/barcode, which the board shouldn't
+    require just to boot)."""
+    try:
+        import bpt as _b
+        return _b.PALLET_PREFIXES, _b.CRATE_PREFIXES
+    except Exception:
+        return ("PL", "SPL"), ("WC",)
 
 def load_print_settings():
     s = _print_settings_defaults()
@@ -3519,7 +3540,12 @@ def _issue_place_pdo(pdo_id, station):
 @app.route('/api/printers')
 def api_printers():
     import printing
-    return jsonify({'printers': printing.list_printers(), 'win': printing.available()})
+    s = load_print_settings()
+    ready, detail = printing.silent_ready(s.get('sumatra_path', ''), s.get('browser_path', ''))
+    return jsonify({'printers': printing.list_printers(), 'win': printing.available(),
+                    'silent_ready': ready, 'silent_detail': detail,
+                    'browser': printing.find_browser(s.get('browser_path', '')),
+                    'sumatra': printing.find_sumatra(s.get('sumatra_path', ''))})
 
 @app.route('/api/print_settings', methods=['GET', 'POST'])
 def api_print_settings():
@@ -3527,9 +3553,18 @@ def api_print_settings():
         return jsonify(load_print_settings())
     d = request.get_json(silent=True) or {}
     s = load_print_settings()
-    for k in ('maindb_path', 'zebra_printer', 'canon_printer'):
+    for k in ('maindb_path', 'zebra_printer', 'canon_printer', 'sumatra_path', 'browser_path'):
         if isinstance(d.get(k), str):
             s[k] = d[k].strip()
+    if 'silent_bpt' in d:
+        s['silent_bpt'] = bool(d['silent_bpt'])
+    for k in ('pallet_prefixes', 'crate_prefixes'):
+        if k in d:
+            v = d[k]
+            if isinstance(v, str):
+                v = [x.strip().upper() for x in v.replace(';', ',').split(',') if x.strip()]
+            if isinstance(v, list) and v:
+                s[k] = v
     if 'email_recipients' in d:
         v = d['email_recipients']
         if isinstance(v, str):
@@ -3568,8 +3603,26 @@ def api_issue_ticket():
         dest = p.get('dest', ''); pii = p.get('pii_po', ''); vendor = p.get('vendor', '')
         prod_type = p.get('pack_type', ''); desc = p.get('desc', '')
         settings = load_print_settings()
+        pal_pfx = settings.get('pallet_prefixes') or None
+        crate_pfx = settings.get('crate_prefixes') or None
+
+        # Resolve the packing standard ONCE and report it, so a wrong box count is
+        # visible as "which qty/box did it use, from which market row" instead of
+        # being silently baked into the ticket.
+        bucket = _bpt.market_bucket(dest)
+        std = _bpt.resolve_pack_std(mdb, part, bucket, pal_pfx)
+        std_info = {'market': bucket, 'qty_per_box': std['qty_per_box'],
+                    'box_per_pallet': std['box_per_pallet'], 'source': std['source'],
+                    'buckets_available': std['buckets_available'], 'ok': std['ok'],
+                    'error': std['error']}
+        if not std['ok']:
+            warnings.append(std['error'])
+        elif std['source'] != 'exact':
+            warnings.append(f"Packing standard taken from the {std['source']} row — "
+                            f"no row for market '{bucket}'. Verify qty/box in MainDatabase.")
 
         lps = []
+        boxes = []          # per-box outcome, shown in the confirmation dialog
         if do_box:
             r = _bl.build_box_labels(mdb, po=po, part=part, po_qty=qty, dest=dest,
                                      station=station, pii=pii, desc=desc,
@@ -3579,34 +3632,63 @@ def api_issue_ticket():
             else:
                 for L in r['labels']:
                     lps.append(L['lp'])
-                    if _pr.available() and settings.get('zebra_printer'):
+                    ok, err = False, ''
+                    if not _pr.available():
+                        err = 'pywin32 not installed on this PC'
+                    elif not settings.get('zebra_printer'):
+                        err = 'no Zebra printer set in print settings'
+                    else:
                         try:
                             _pr.print_zpl_raw(_bl.render_zpl(L['d']),
                                               settings['zebra_printer'], doc=f"LP {L['lp']}")
+                            ok = True
                         except Exception as e:
-                            warnings.append(f"Zebra print failed (box {L['box_no']}): {e}")
-                    else:
-                        warnings.append("Zebra not printed (no pywin32/printer on this host)")
+                            err = str(e)
+                    if not ok:
+                        warnings.append(f"Zebra box {L['box_no']}: {err}")
+                    boxes.append({'box_no': L['box_no'], 'qty': L['box_qty'],
+                                  'lp': L['lp'], 'printed': ok, 'error': err})
                     # DUMMY LP → no [License Plate] INSERT yet (SQL phase).
 
         bpt_token = None
+        bpt_pages = 0
+        bpt_printed = False
+        bpt_detail = ''
         if do_bpt:
             t = _bpt.build_bpt(mdb, fg=part, po=po, dest=dest, station=station,
-                               pro_time=pro_time, po_qty=qty, fg_desc=desc)
+                               pro_time=pro_time, po_qty=qty, fg_desc=desc,
+                               pallet_prefixes=pal_pfx, crate_prefixes=crate_pfx)
             t['date'] = datetime.now().strftime('%d-%b-%y')
             t['issue_time'] = datetime.now().strftime('%H:%M')
+            bpt_pages = t.get('total_boxes', 0)
             if not t.get('has_data'):
-                warnings.append("BPT: no packaging BOM rows for this FG/market")
+                warnings.append(
+                    f"BPT has no rows to pick: {t.get('material_count', 0)} packaging BOM "
+                    f"material(s) for market '{bucket}', qty/box {t.get('qty_per_box_std', 0)}")
             bpt_token = _uuid.uuid4().hex
             _bpt_tickets[bpt_token] = t
             if len(_bpt_tickets) > 50:
                 for k in list(_bpt_tickets)[:-50]:
                     _bpt_tickets.pop(k, None)
+            # Silent paper path (headless render → named Canon queue). Falls back
+            # to the browser tab, which is what bpt_printed=False tells the client.
+            if settings.get('silent_bpt') and bpt_pages:
+                html = _bpt.render_html(t)
+                bpt_printed, bpt_detail = _pr.print_html_silent(
+                    html, settings.get('canon_printer', ''),
+                    settings.get('sumatra_path', ''), settings.get('browser_path', ''))
+                if not bpt_printed:
+                    warnings.append(f"Silent BPT print unavailable ({bpt_detail}) — "
+                                    f"opening the print dialog instead")
 
         with _cache_lock:
             placed = _issue_place_pdo(pdo_id, station)
 
-        return jsonify({'ok': True, 'lps': lps, 'bpt_token': bpt_token,
+        return jsonify({'ok': True, 'lps': lps, 'boxes': boxes, 'std': std_info,
+                        'bpt_token': bpt_token, 'bpt_pages': bpt_pages,
+                        'bpt_printed': bpt_printed, 'bpt_detail': bpt_detail,
+                        'do_bpt': bool(do_bpt), 'do_box': bool(do_box),
+                        'pdo_id': pdo_id, 'part': part, 'po_qty': qty,
                         'placed': placed, 'warnings': warnings})
     except Exception as e:
         print(f'[api_issue_ticket error] {e}')

@@ -52,6 +52,121 @@ def print_zpl_raw(zpl, printer_name, doc="Box label"):
 def print_pdf_to(printer_name, pdf_path):
     """Best-effort silent PDF print to a named printer via the registered
     handler's 'printto' verb (Adobe/Foxit/SumatraPDF support it; Edge is spotty).
-    Not used by the default flow (BPT prints from the browser) — here for later."""
+    Legacy fallback — the reliable path is print_html_silent() below."""
     import win32api
     win32api.ShellExecute(0, "printto", pdf_path, f'"{printer_name}"', ".", 0)
+
+
+# ── Silent BPT path: HTML → PDF (headless Chromium) → named printer (Sumatra) ──
+# Windows can render a PDF but cannot send one to a *named* printer without UI,
+# so the paper side needs two steps. Headless Edge/Chrome is already on every
+# Windows PC; SumatraPDF is a single portable .exe (no installer, no admin) that
+# takes `-print-to "<queue>"`. Either piece missing → we say so and the caller
+# falls back to the browser-tab print dialog, so printing never hard-fails.
+
+import os
+import shutil
+import subprocess
+import tempfile
+
+_BROWSER_CANDIDATES = [
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+]
+
+_SUMATRA_CANDIDATES = [
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools", "SumatraPDF.exe"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "SumatraPDF.exe"),
+    os.path.expandvars(r"%LOCALAPPDATA%\SumatraPDF\SumatraPDF.exe"),
+    r"C:\Program Files\SumatraPDF\SumatraPDF.exe",
+    r"C:\Program Files (x86)\SumatraPDF\SumatraPDF.exe",
+]
+
+
+def find_browser(explicit=""):
+    """Path to a headless-capable Chromium (Edge first — always present on Win10+)."""
+    for p in ([explicit] if explicit else []) + _BROWSER_CANDIDATES:
+        if p and os.path.exists(p):
+            return p
+    for exe in ("msedge", "chrome"):
+        p = shutil.which(exe)
+        if p:
+            return p
+    return ""
+
+
+def find_sumatra(explicit=""):
+    """Path to SumatraPDF.exe (the PDF → named-printer step)."""
+    for p in ([explicit] if explicit else []) + _SUMATRA_CANDIDATES:
+        if p and os.path.exists(p):
+            return p
+    return shutil.which("SumatraPDF") or ""
+
+
+def silent_ready(sumatra_path="", browser_path=""):
+    """(ok, detail) — whether the fully silent BPT path can run on this PC."""
+    b, s = find_browser(browser_path), find_sumatra(sumatra_path)
+    if not b:
+        return False, "no headless browser found (Edge/Chrome)"
+    if not s:
+        return False, "SumatraPDF.exe not found — put it in a 'tools' folder next to app.py"
+    return True, f"{os.path.basename(b)} + {os.path.basename(s)}"
+
+
+def html_to_pdf(html_text, pdf_path, browser_path="", timeout=90):
+    """Render HTML to PDF with headless Chromium. Uses a throwaway user-data-dir
+    so it still works when the operator already has Edge open (a shared profile
+    makes headless silently attach to the running instance and produce nothing)."""
+    browser = find_browser(browser_path)
+    if not browser:
+        raise RuntimeError("no headless browser found (Edge/Chrome)")
+    tmpdir = tempfile.mkdtemp(prefix="bpt_")
+    html_path = os.path.join(tmpdir, "ticket.html")
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html_text)
+    profile = os.path.join(tmpdir, "profile")
+    cmd = [
+        browser, "--headless=new", "--disable-gpu", "--no-first-run", "--no-sandbox",
+        f"--user-data-dir={profile}",
+        "--no-pdf-header-footer",
+        # data-URI barcodes decode fast, but give the renderer a budget so a slow
+        # PC can't hand us a half-drawn page.
+        "--virtual-time-budget=8000",
+        "--run-all-compositor-stages-before-draw",
+        f"--print-to-pdf={pdf_path}",
+        "file:///" + html_path.replace("\\", "/"),
+    ]
+    r = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+        err = (r.stderr or b"").decode("utf-8", "replace").strip()[:300]
+        raise RuntimeError(f"headless render produced no PDF ({err or 'no output'})")
+    return pdf_path
+
+
+def print_pdf_silent(pdf_path, printer_name, sumatra_path="", timeout=120):
+    """Send a PDF to a named Windows queue with no dialog, via SumatraPDF."""
+    sumatra = find_sumatra(sumatra_path)
+    if not sumatra:
+        raise RuntimeError("SumatraPDF.exe not found")
+    cmd = [sumatra, "-print-to", printer_name, "-silent", "-exit-when-done", pdf_path]
+    r = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    if r.returncode != 0:
+        err = (r.stderr or b"").decode("utf-8", "replace").strip()[:300]
+        raise RuntimeError(f"SumatraPDF exit {r.returncode} ({err or 'no message'})")
+    return True
+
+
+def print_html_silent(html_text, printer_name, sumatra_path="", browser_path=""):
+    """Full silent paper path: HTML → PDF → named printer. Returns (ok, detail);
+    never raises, so the caller can fall back to the browser dialog."""
+    if not printer_name:
+        return False, "no Canon printer set in print settings"
+    tmp_pdf = os.path.join(tempfile.mkdtemp(prefix="bpt_pdf_"), "ticket.pdf")
+    try:
+        html_to_pdf(html_text, tmp_pdf, browser_path)
+        print_pdf_silent(tmp_pdf, printer_name, sumatra_path)
+        return True, f"printed to {printer_name}"
+    except Exception as e:
+        return False, str(e)

@@ -247,6 +247,35 @@ materials; `5144355-329`/`NP` → WI N27, TS 340, qty/box 1080, 4 materials.
   rotates 90° (media feeds narrow-edge first), emits `^GF` ZPL at `^PW1298 ^LL2007`. `--rotate 270`
   flips it. Real native Code128 barcodes.
 
+### 4c-bis. Packing standard = the single source of the box split (build `.8`)
+**`bpt.resolve_pack_std(mdb, fg, bucket)` is now the ONE resolver** for qty/box +
+box/pallet, used by BOTH `build_bpt` and `boxlabel.build_box_labels` — they must never
+disagree, or a PDO prints N tickets and a different number of labels.
+- **STRICT on the market bucket.** The old code did
+  `qtybox.get((fg,bucket)) or qtybox_any.get(fg)`, where `qtybox_any` is *first row
+  seen* for that FG. On a bucket miss it silently returned **another market's**
+  standard: a 100/box PVN row used for a 50/box `Other` order turned a 100 pc PDO into
+  **one** ticket carrying the pallet, while `boxlabel` (which had no fallback) refused
+  outright. That was the reported "not splitting by boxes" bug — reproduced and fixed.
+- The one fallback kept: an FG with **exactly one** packing row in the file uses it and
+  reports `source='only-row (…)'`. Two or more candidates and no bucket match = hard
+  miss, listing the buckets that exist.
+- Pallet materials (`PL`/`SPL`) and crate (`WC`) prefixes moved to **print settings**
+  (`pallet_prefixes` / `crate_prefixes`) — a new prefix is config, not code.
+- Ticket now shows **Box n/N · Pallet p/P · Standard** and marks the box that opens a
+  pallet; zero-qty pallet rows print greyed rather than vanishing. `.ticket:last-child`
+  no longer forces a page break (killed the trailing blank sheet).
+
+### 4c-ter. Silent BPT printing (build `.8`)
+Zebra was always silent (raw ZPL via pywin32). The **paper** side now has a silent path
+in `printing.py`: **headless Edge/Chrome → PDF → SumatraPDF `-print-to "<queue>"`**.
+Windows cannot send a PDF to a *named* printer without UI, hence the two steps;
+SumatraPDF is a single portable exe (auto-detected, or `sumatra_path` in settings).
+`html_to_pdf` uses a **throwaway `--user-data-dir`** — with a shared profile, headless
+attaches to the operator's already-open Edge and silently produces nothing.
+Missing browser or Sumatra → `print_html_silent` returns `(False, reason)` and the
+client falls back to the browser tab. `/api/printers` reports `silent_ready`/`silent_detail`.
+
 ### 4d. `app.py` integration + `printing.py`
 - **MainDatabase** parsed once, cached (`get_maindb`, 10-min TTL, path from settings, reload on change).
 - Endpoints: **`/api/printers`** (installed printers via win32, `[]` off-Windows) · **`/api/print_settings`**
@@ -260,8 +289,13 @@ materials; `5144355-329`/`NP` → WI N27, TS 340, qty/box 1080, 4 materials.
   if free, else queue; mirrors `/api/assign`). Returns `{ok, lps, bpt_token, placed, warnings}`.
 - **UI (board.html):** a **🖨 button on each PDO card** → Issue modal (station datalist, prod time,
   which paths); a top-bar **🖨 Print** button → settings modal (Zebra + Canon printer with the
-  installed-printer datalist, MainDatabase path, email recipients). On success the BPT opens in a new
-  tab that auto-prints; the PDO appears on the station.
+  installed-printer datalist, silent-print toggle + live readiness line, SumatraPDF path, pallet
+  prefixes, MainDatabase path, email recipients).
+- **Print-result dialog (`ov-printres`, build `.8`) — BLOCKING.** Every issue ends here: resolved
+  packing standard (market, qty/box, box/pallet → box + pallet counts), BPT page count and where it
+  went, a per-box table (box, qty, License Plate, ✓/✕ with the error), and warnings. `.ov` overlays
+  in this file already ignore backdrop/Esc, so **OK is the only exit**; `forceLoad()` runs on OK, not
+  before, so the board can't shift under the operator while they read. Replaced the auto-fading toast.
 - **`printing.py`**: all win32 imports are **lazy** so it imports off-Windows; `list_printers()`,
   `print_zpl_raw(zpl, printer)`, `print_pdf_to(printer, pdf)` (for a future silent Canon path).
 - **Two paths, two printers, two settings** — Zebra (server-side ZPL) + Canon (browser print dialog).

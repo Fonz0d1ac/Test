@@ -6,3 +6,6 @@ lp_suppress_*.json
 __pycache__/
 *.pyc
 *.tmp
+# On Linux a UNC share path becomes one literal directory name full of
+# backslashes — created whenever the app or a test runs off-Windows.
+\\\\*

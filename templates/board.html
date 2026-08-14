@@ -294,6 +294,25 @@ select.btn{font-family:inherit;appearance:none;-webkit-appearance:none;padding-r
 .gantt-empty{padding:30px; text-align:center; color:var(--text3); font-size:12px}
 
 
+/* print-result dialog */
+.pr-banner{border-radius:var(--r);padding:9px 13px;font-size:14px;font-weight:600;margin-bottom:10px}
+.pr-banner.ok{background:rgba(52,211,153,.12);border:1px solid var(--green-dim);color:var(--green)}
+.pr-banner.warn{background:rgba(251,191,36,.12);border:1px solid var(--amber-dim);color:var(--amber)}
+.pr-banner.err{background:rgba(248,113,113,.12);border:1px solid var(--red-dim);color:var(--red)}
+.pr-meta{font-size:12.5px;color:var(--text2);font-family:'IBM Plex Mono',monospace;margin-bottom:8px}
+.pr-std{font-size:12.5px;color:var(--text);background:var(--bg3);border:1px solid var(--border2);
+        border-radius:var(--r);padding:8px 11px;margin-bottom:8px;line-height:1.5}
+.pr-std b{color:var(--text)}
+.pr-std .bad{color:var(--red)}
+.pr-line{font-size:12.5px;color:var(--text2);margin-bottom:4px}
+.pr-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.pr-tbl th{position:sticky;top:0;background:var(--bg3);color:var(--text3);text-align:left;
+           padding:5px 8px;font-weight:600;border-bottom:1px solid var(--border2)}
+.pr-tbl td{padding:4px 8px;border-bottom:1px solid var(--border);font-family:'IBM Plex Mono',monospace}
+.pr-tbl td.st-ok{color:var(--green)}
+.pr-tbl td.st-err{color:var(--red);font-family:inherit}
+.pr-warn{margin-top:9px;font-size:12px;color:var(--amber);line-height:1.55}
+.pr-warn div{margin-top:3px}
 /* toast */
 .toast{position:fixed;bottom:56px;right:16px;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:9px 15px;font-size:13px;opacity:0;transform:translateY(6px);transition:opacity .2s,transform .2s;pointer-events:none;z-index:600;max-width:320px}
 .toast.show{opacity:1;transform:translateY(0)}
@@ -665,7 +684,7 @@ tr.report-row-assigned .report-station-select{color:var(--green); border-color:v
       <div><label>minute</label><input id="issue-prom" type="number" min="0" max="59" placeholder="00" style="width:80px"></div>
     </div>
     <div style="margin-top:12px;display:flex;flex-direction:column;gap:7px;font-size:13px">
-      <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" id="issue-bpt" checked> BPT packaging ticket <span style="color:var(--text3)">→ Canon (browser print)</span></label>
+      <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" id="issue-bpt" checked> BPT packaging ticket <span style="color:var(--text3)">→ Canon (one page per box)</span></label>
       <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" id="issue-box" checked> Box label + License Plate <span style="color:var(--text3)">→ Zebra</span></label>
     </div>
     <div id="issue-msg" style="font-size:12px;margin-top:10px;color:var(--text3);min-height:16px"></div>
@@ -684,6 +703,14 @@ tr.report-row-assigned .report-station-select{color:var(--green); border-color:v
     <input id="ps-zebra" list="ps-printers" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px">
     <label style="margin-top:8px">Canon printer (BPT packaging ticket)</label>
     <input id="ps-canon" list="ps-printers" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px">
+    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;color:var(--text)">
+      <input type="checkbox" id="ps-silent"> Print the BPT silently (no pop-up, no Print click)
+    </label>
+    <div id="ps-silent-state" style="font-size:11.5px;color:var(--text3);margin:2px 0 0 24px;line-height:1.5"></div>
+    <label style="margin-top:8px">SumatraPDF.exe path <span style="color:var(--text3)">— blank = auto-detect</span></label>
+    <input id="ps-sumatra" placeholder="e.g. C:\tools\SumatraPDF.exe" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px;font-family:'IBM Plex Mono',monospace;font-size:12px">
+    <label style="margin-top:8px">Pallet material prefixes <span style="color:var(--text3)">— comma separated; these are picked once per pallet, not per box</span></label>
+    <input id="ps-palpfx" placeholder="PL, SPL" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px;font-family:'IBM Plex Mono',monospace;font-size:12px">
     <label style="margin-top:8px">MainDatabase.xlsx path</label>
     <input id="ps-maindb" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px;font-family:'IBM Plex Mono',monospace;font-size:12px">
     <label style="margin-top:8px">New-part email recipients (one per line, or ; / , separated)</label>
@@ -692,6 +719,25 @@ tr.report-row-assigned .report-station-select{color:var(--green); border-color:v
     <div class="mbtns">
       <button class="btn" onclick="closePrintSettings()">Close</button>
       <button class="btn p" onclick="savePrintSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Print result — BLOCKING. No backdrop/Esc close: the operator must click OK,
+     so a failed label can't scroll past unnoticed while they carry on working. -->
+<div class="ov" id="ov-printres" style="z-index:700">
+  <div class="modal" style="width:620px;max-width:96vw">
+    <h3 id="pr-title">🖨 <span>Print result</span></h3>
+    <div id="pr-banner" class="pr-banner"></div>
+    <div id="pr-meta" class="pr-meta"></div>
+    <div id="pr-std" class="pr-std"></div>
+    <div id="pr-bpt" class="pr-line"></div>
+    <div id="pr-boxwrap" style="max-height:230px;overflow:auto;margin-top:10px">
+      <table class="pr-tbl" id="pr-boxes"></table>
+    </div>
+    <div id="pr-warn" class="pr-warn"></div>
+    <div class="mbtns">
+      <button class="btn p" id="pr-ok" onclick="closePrintResult()" style="min-width:110px">OK</button>
     </div>
   </div>
 </div>
@@ -1165,13 +1211,75 @@ async function submitIssue() {
     const r = await fetch('/api/issue_ticket', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const d = await r.json();
     if (!r.ok) { msg.textContent = '⚠ ' + (d.error || 'failed'); go.disabled = false; return; }
-    if (d.bpt_token) window.open('/bpt/' + d.bpt_token, '_blank');   // BPT auto-prints in the new tab
-    const w = d.warnings || [];
-    toast(`Issued · ${(d.lps||[]).length} label(s) · queued on ${station} (${d.placed})` + (w.length ? ` · ${w.length} warning(s)` : ''), w.length ? 'warn' : 'ok');
-    if (w.length) console.warn('issue warnings:', w);
+    // Only fall back to the browser print dialog when the silent path didn't run.
+    if (d.do_bpt && d.bpt_token && !d.bpt_printed) window.open('/bpt/' + d.bpt_token, '_blank');
     closeIssueModal();
-    forceLoad();
+    showPrintResult(d, station);
   } catch (e) { msg.textContent = 'Network error'; go.disabled = false; }
+}
+
+// ── Print result — blocking confirmation ──────────────────────────────────────
+// Every issue ends here, success or not. The operator must click OK, and the
+// board only refreshes after that, so nothing moves under them while they read.
+function showPrintResult(d, station) {
+  const boxes = d.boxes || [], warn = d.warnings || [], std = d.std || {};
+  const failed = boxes.filter(b => !b.printed).length;
+  const printedN = boxes.length - failed;
+  const bptFell = d.do_bpt && !d.bpt_printed;
+
+  let cls = 'ok', head = '✓ Printed';
+  if (boxes.length && failed === boxes.length) { cls = 'err'; head = '✕ Nothing printed'; }
+  else if (failed || warn.length)              { cls = 'warn'; head = '⚠ Printed with problems'; }
+  if (!std.ok) { cls = 'err'; head = '✕ Packing standard not found'; }
+
+  const bn = document.getElementById('pr-banner');
+  bn.className = 'pr-banner ' + cls;
+  bn.textContent = head + ' · ' + `queued on ${station} (${d.placed === 'inprogress' ? 'in progress' : 'queue'})`;
+
+  document.getElementById('pr-meta').textContent =
+    `${d.pdo_id}  ·  ${d.part || ''}  ·  ${d.po_qty || 0} pcs`;
+
+  // The packing standard drives the whole split, so show what it resolved to.
+  const stdEl = document.getElementById('pr-std');
+  if (std.ok) {
+    const boxesN = std.qty_per_box ? Math.ceil((d.po_qty || 0) / std.qty_per_box) : 0;
+    const palletsN = std.box_per_pallet ? Math.ceil(boxesN / std.box_per_pallet) : 0;
+    stdEl.innerHTML =
+      `Packing standard · market <b>${esc(std.market || '')}</b>: ` +
+      `<b>${std.qty_per_box}</b> pcs/box · <b>${std.box_per_pallet}</b> box/pallet` +
+      `<br>${d.po_qty || 0} pcs → <b>${boxesN}</b> box(es) on <b>${palletsN}</b> pallet(s)` +
+      (std.source !== 'exact' ? `<br><span class="bad">⚠ taken from the ${esc(std.source)} row — no row for this market</span>` : '');
+  } else {
+    stdEl.innerHTML = `<span class="bad">${esc(std.error || 'No packing standard for this part/market.')}</span>` +
+      `<br>Fix the Qty/Box block in MainDatabase.xlsx for this part, then issue again.`;
+  }
+
+  document.getElementById('pr-bpt').innerHTML = !d.do_bpt ? 'BPT ticket: skipped' :
+    (d.bpt_printed
+      ? `BPT ticket: <b>${d.bpt_pages}</b> page(s) — ${esc(d.bpt_detail || 'sent to Canon')}`
+      : `BPT ticket: <b>${d.bpt_pages}</b> page(s) — opened in a tab, confirm the print dialog`);
+
+  const tbl = document.getElementById('pr-boxes');
+  document.getElementById('pr-boxwrap').style.display = boxes.length ? '' : 'none';
+  tbl.innerHTML = boxes.length
+    ? '<tr><th>Box</th><th>Qty</th><th>License plate</th><th>Zebra</th></tr>' +
+      boxes.map(b => `<tr><td>${b.box_no}/${boxes.length}</td><td>${b.qty}</td>` +
+        `<td>${esc(b.lp)}</td>` +
+        (b.printed ? '<td class="st-ok">✓ printed</td>'
+                   : `<td class="st-err">✕ ${esc(b.error || 'failed')}</td>`) + '</tr>').join('')
+    : '';
+
+  const wEl = document.getElementById('pr-warn');
+  wEl.innerHTML = warn.length ? warn.map(w => `<div>⚠ ${esc(w)}</div>`).join('') : '';
+
+  if (boxes.length) console.info(`issue: ${printedN}/${boxes.length} labels printed`);
+  if (bptFell) console.info('BPT silent path unavailable — used the browser dialog');
+  document.getElementById('ov-printres').classList.add('show');
+  setTimeout(() => document.getElementById('pr-ok').focus(), 60);
+}
+function closePrintResult() {
+  document.getElementById('ov-printres').classList.remove('show');
+  forceLoad();   // refresh only after the operator has acknowledged
 }
 
 async function openPrintSettings() {
@@ -1182,6 +1290,11 @@ async function openPrintSettings() {
     const pr = await (await fetch('/api/printers')).json();
     document.getElementById('ps-printers').innerHTML = (pr.printers || []).map(p => `<option value="${esc(p)}">`).join('');
     win = pr.win;
+    // Say plainly whether silent printing can actually run here, and what's missing.
+    document.getElementById('ps-silent-state').innerHTML = pr.silent_ready
+      ? `<span style="color:var(--green)">✓ ready — ${esc(pr.silent_detail)}</span>`
+      : `<span style="color:var(--amber)">⚠ not available — ${esc(pr.silent_detail)}.` +
+        ` Until then the BPT opens in a tab and you confirm the dialog.</span>`;
   } catch (e) {}
   try {
     const s = await (await fetch('/api/print_settings')).json();
@@ -1189,6 +1302,9 @@ async function openPrintSettings() {
     document.getElementById('ps-canon').value = s.canon_printer || '';
     document.getElementById('ps-maindb').value = s.maindb_path || '';
     document.getElementById('ps-email').value = (s.email_recipients || []).join('\n');
+    document.getElementById('ps-silent').checked = s.silent_bpt !== false;
+    document.getElementById('ps-sumatra').value = s.sumatra_path || '';
+    document.getElementById('ps-palpfx').value = (s.pallet_prefixes || []).join(', ');
   } catch (e) {}
   if (!win) msg.textContent = 'Note: no Windows printers detected on this host (pywin32). Names still save; actual printing runs on the board PC.';
 }
@@ -1200,6 +1316,9 @@ async function savePrintSettings() {
     canon_printer: document.getElementById('ps-canon').value.trim(),
     maindb_path: document.getElementById('ps-maindb').value.trim(),
     email_recipients: document.getElementById('ps-email').value,
+    silent_bpt: document.getElementById('ps-silent').checked,
+    sumatra_path: document.getElementById('ps-sumatra').value.trim(),
+    pallet_prefixes: document.getElementById('ps-palpfx').value,
   };
   try {
     const r = await fetch('/api/print_settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});

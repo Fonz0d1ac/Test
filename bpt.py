@@ -145,7 +145,67 @@ def _ceil_div(a, b):
     return math.ceil(a / b) if b else 0
 
 
-def build_bpt(mdb, fg, po, dest, station, pro_time, po_qty, fg_desc=""):
+def _num(v, d=0.0):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return d
+
+
+# Packaging materials whose quantity is per-PALLET, not per-box: one unit lands
+# on the first box of each Box/Pallet group, zero on the rest. Detected by code
+# prefix (the business chose prefixes over a packaging_type table). WC additionally
+# flags the ticket for wooden-crate print routing. Both lists are overridable from
+# print settings, so a new prefix doesn't need a code change.
+PALLET_PREFIXES = ("PL", "SPL")
+CRATE_PREFIXES = ("WC",)
+
+
+def resolve_pack_std(mdb, fg, bucket, pallet_prefixes=None):
+    """Resolve the packaging standard (qty/box, box/pallet) for ONE FG + market
+    bucket, and report how it was resolved.
+
+    STRICT on the bucket. The P…X block in MainDatabase is keyed by `Part & PartDes`,
+    so each market can carry its own qty/box — and quietly falling back to "the
+    first row we saw for this FG" hands back another market's standard. That is
+    what collapses the box split: a 100/box PVN row used for a 50/box Other order
+    turns a 100pc PDO into ONE box (one ticket, pallet included) instead of two.
+
+    The one fallback kept is unambiguous: if the exact bucket misses but the FG has
+    exactly ONE packing row in the whole file, use it and say so. With two or more
+    candidates it is a hard miss, listing the buckets that exist.
+
+    Returns {ok, qty_per_box, box_per_pallet, bucket, source, weights,
+             buckets_available, error}."""
+    keys = [(p, b) for (p, b) in mdb.wt_by_key if p == fg]
+    have = sorted({b for (_p, b) in keys})
+    row, source = mdb.wt_by_key.get((fg, bucket)), 'exact'
+    if row is None and len(keys) == 1:
+        row, source = mdb.wt_by_key[keys[0]], f'only-row ({keys[0][1] or "blank market"})'
+    out = {'ok': False, 'qty_per_box': 0, 'box_per_pallet': 1, 'bucket': bucket,
+           'source': source, 'weights': row or {}, 'buckets_available': have,
+           'error': '', 'pallet_prefixes': tuple(pallet_prefixes or PALLET_PREFIXES)}
+    if row is None:
+        out['error'] = (f"No packing standard for {fg} in market '{bucket}'"
+                        + (f" — MainDatabase has: {', '.join(b or '(blank)' for b in have)}"
+                           if have else " — this FG has no rows in the Qty/Box block at all"))
+        return out
+    qpb = int(_num(row.get('Q')))
+    bpp = int(_num(row.get('W')))
+    if qpb <= 0:
+        out['error'] = f"Qty/box is empty or zero for {fg} / '{bucket}' (MainDatabase col Q)"
+        return out
+    out.update(ok=True, qty_per_box=qpb, box_per_pallet=bpp if bpp > 0 else 1)
+    return out
+
+
+def is_pallet_material(code, prefixes=PALLET_PREFIXES):
+    """True if this material is consumed per pallet rather than per box."""
+    return str(code or "").upper().startswith(tuple(p.upper() for p in prefixes))
+
+
+def build_bpt(mdb, fg, po, dest, station, pro_time, po_qty, fg_desc="",
+              pallet_prefixes=None, crate_prefixes=None):
     """Build the full ticket (one entry per box) for FG+destination. `dest` is the
     PDO-report Destination value (plan col F, a NAME like 'TRICAP'/'Shakopee').
     CheckDes (the printed/barcoded destination code) = XLOOKUP(dest, AV→AW), e.g.
@@ -155,15 +215,23 @@ def build_bpt(mdb, fg, po, dest, station, pro_time, po_qty, fg_desc=""):
     bucket = market_bucket(dest)
     dest_code = mdb.des_by_raw.get(dest) or mdb.des_by_raw.get((dest or "").strip()) or "Chua co du lieu"
     po_qty = int(po_qty or 0)
-    qpb, bpp = mdb.qtybox.get((fg, bucket)) or mdb.qtybox_any.get(fg) or (None, None)
-    qty_per_box_std = int(qpb) if qpb else 0
-    box_per_pallet = int(bpp) if bpp else 1
+    pal_pfx = tuple(pallet_prefixes or PALLET_PREFIXES)
+    crate_pfx = tuple(crate_prefixes or CRATE_PREFIXES)
+
+    std = resolve_pack_std(mdb, fg, bucket, pal_pfx)
+    qty_per_box_std = std['qty_per_box']
+    box_per_pallet = std['box_per_pallet']
     wi = mdb.wi_by_fg.get(fg, "")
     ts = mdb.ts_by_fg.get(fg, "")
 
     mats = [r for r in mdb.pack_by_fg.get(fg, []) if r['dest'] == bucket]
 
+    # One ticket per box: ceil(PDO qty / qty per box), last box carries the
+    # remainder. Pallet-level materials appear only on the box that opens each
+    # Box/Pallet group, so ticket 1 of a 2-box/pallet run carries the pallet and
+    # ticket 2 carries box materials only.
     total_boxes = _ceil_div(po_qty, qty_per_box_std) if qty_per_box_std else 0
+    total_pallets = _ceil_div(total_boxes, box_per_pallet) if box_per_pallet else 0
     wooden_crate = False
     boxes = []
     for xx in range(1, total_boxes + 1):
@@ -173,17 +241,20 @@ def build_bpt(mdb, fg, po, dest, station, pro_time, po_qty, fg_desc=""):
             box_qty = rem if rem else qty_per_box_std
         else:
             box_qty = qty_per_box_std
+        opens_pallet = ((xx - 1) % box_per_pallet == 0)
+        pallet_no = ((xx - 1) // box_per_pallet) + 1
         rows = []
         for i, m in enumerate(mats, start=1):
             code = m['code']
             usage = float(m['usage'] or 0)
             lotqty = float(m['lotqty'] or 0)
-            # PL / SPL: one unit on the first box of each pallet group, else zero
-            if code.startswith("PL") or code.startswith("SPL"):
-                qty = 1 if ((xx - 1) % box_per_pallet == 0) else 0
+            # Pallet-level material: one unit on the box that opens each pallet
+            # group, zero on the rest. Everything else scales with THIS box's qty.
+            if is_pallet_material(code, pal_pfx):
+                qty = 1 if opens_pallet else 0
             else:
                 qty = _ceil_div(box_qty, lotqty) * usage
-            if code.startswith("WC"):
+            if str(code or "").upper().startswith(tuple(p.upper() for p in crate_pfx)):
                 wooden_crate = True
             ratio = f"{_fmt_num(m['usage'])}/{_fmt_num(m['lotqty'])}"
             rows.append({
@@ -192,15 +263,20 @@ def build_bpt(mdb, fg, po, dest, station, pro_time, po_qty, fg_desc=""):
                 'ratio': ratio, 'qty': _fmt_num(qty),
                 'location': mdb.loc_by_part.get(code, ""),
                 'type': mdb.type_by_part.get(code, ""),
+                'per_pallet': is_pallet_material(code, pal_pfx),
             })
-        boxes.append({'box_no': xx, 'box_qty': box_qty, 'is_final': is_final, 'materials': rows})
+        boxes.append({'box_no': xx, 'box_qty': box_qty, 'is_final': is_final,
+                      'opens_pallet': opens_pallet, 'pallet_no': pallet_no,
+                      'materials': rows})
 
     return {
         'po': po, 'fg': fg, 'fg_desc': fg_desc, 'po_qty': po_qty,
         'dest_name': dest, 'dest_text': dest_code, 'bucket': bucket,
         'wi': wi, 'station': station, 'pro_time': pro_time, 'ts': ts,
         'qty_per_box_std': qty_per_box_std, 'box_per_pallet': box_per_pallet,
-        'total_boxes': total_boxes, 'wooden_crate': wooden_crate, 'boxes': boxes,
+        'total_boxes': total_boxes, 'total_pallets': total_pallets,
+        'wooden_crate': wooden_crate, 'boxes': boxes, 'std': std,
+        'material_count': len(mats),
         'has_data': bool(qty_per_box_std and mats),
     }
 
@@ -230,10 +306,16 @@ def render_html(ticket, min_rows=16):
                                     module_height=11, font_size=9)
         dest_bc = code128_datauri(ticket['dest_text'], module_height=14, font_size=9, module_width=0.3)
         final = ' <span class="final">(Final)</span>' if box['is_final'] and ticket['total_boxes'] > 1 else ''
+        pallet_tag = (' <span class="ptag">pallet on this box</span>' if box['opens_pallet']
+                      else ' <span class="ptag dim">no pallet</span>')
         rows = list(box['materials'])
         pad = max(0, min_rows - len(rows))
+        # A pallet-level material still prints on every ticket, but greyed with a
+        # 0 on the boxes that don't open a pallet — so the picker sees it was
+        # considered and deliberately not picked, rather than silently missing.
         mat_rows = "".join(
-            f"<tr><td class='c'>{m['no']}</td><td class='mono'>{_esc(m['code'])}</td><td>{_esc(m['desc'])}</td>"
+            f"<tr class='{'zero' if str(m['qty']) == '0' else ''}'>"
+            f"<td class='c'>{m['no']}</td><td class='mono'>{_esc(m['code'])}</td><td>{_esc(m['desc'])}</td>"
             f"<td class='c'>{_esc(m['ver'])}</td><td class='mono c'>{_esc(m['ratio'])}</td>"
             f"<td class='qty'>{_esc(m['qty'])}</td><td>{_esc(m['location'])}</td><td class='c'>{_esc(m['type'])}</td></tr>"
             for m in rows
@@ -266,6 +348,10 @@ def render_html(ticket, min_rows=16):
           <tr><td class="k">Station:</td><td class="station">{_esc(ticket['station'])}</td>
               <td class="k">FG name:</td><td>{_esc(ticket['fg_desc'])}</td>
               <td class="k">Materials use for:</td><td class="muf"><b>{_esc(box['box_qty'])}{final}</b>&nbsp;Pcs FG</td></tr>
+          <tr><td class="k">Box:</td><td class="boxno">{box['box_no']} / {ticket['total_boxes']}</td>
+              <td class="k">Pallet:</td><td>{box['pallet_no']} / {ticket.get('total_pallets', 0)}{pallet_tag}</td>
+              <td class="k">Standard:</td>
+              <td>{ticket['qty_per_box_std']} pcs/box · {ticket['box_per_pallet']} box/pallet</td></tr>
         </table>
 
         <div class="pdoblock">
@@ -285,6 +371,8 @@ def render_html(ticket, min_rows=16):
   * {{ box-sizing: border-box; }}
   body {{ font-family: Arial, 'Segoe UI', sans-serif; color: #111; margin: 0; }}
   .ticket {{ page-break-after: always; }}
+  /* the last ticket must NOT force a break, or every job ends on a blank sheet */
+  .ticket:last-child {{ page-break-after: auto; }}
   .top {{ display: flex; align-items: flex-start; justify-content: space-between; }}
   .title {{ font-size: 15px; font-weight: 700; border-bottom: 2px solid #111; display: inline-block; padding-bottom: 1px; }}
   .banner {{ margin-top: 5px; background: #111; color: #fff; font-weight: 700; padding: 3px 8px; display: inline-block; font-size: 12px; letter-spacing: .02em; }}
@@ -296,6 +384,10 @@ def render_html(ticket, min_rows=16):
   table.meta td {{ padding: 2px 5px; vertical-align: middle; }}
   table.meta td.k {{ font-weight: 700; white-space: nowrap; }}
   .station {{ font-size: 13px; font-weight: 700; }}
+  .boxno {{ font-size: 13px; font-weight: 700; }}
+  .ptag {{ font-size: 9.5px; font-weight: 700; background: #111; color: #fff; padding: 1px 5px; border-radius: 2px; }}
+  .ptag.dim {{ background: #ddd; color: #555; }}
+  table.mat tr.zero td {{ color: #999; }}
   .dest {{ font-weight: 700; font-size: 13px; }}
   .bc {{ text-align: right; }}
   .destbc {{ height: 34px; }}

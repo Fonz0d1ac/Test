@@ -59,18 +59,21 @@ def build_box_labels(mdb, *, po, part, po_qty, dest, station, pii="", desc="",
     {ok, labels:[{box_no, box_qty, lp, d, sql_row}], ...}. `d` is ready for
     label_print.build_zpl / render_mock. `dest` is the plan-F destination NAME."""
     partdes = bpt.market_bucket(dest)                     # PVN / Poland / Other
-    wt = mdb.wt_by_key.get((part, partdes)) or {}
-    qpb = int(_num(wt.get('Q')))                          # QtyPerBoxSTD
+    # Same resolver the BPT uses — the two paths MUST agree on qty/box and
+    # box/pallet, or a PDO prints N tickets and a different number of labels.
+    std = bpt.resolve_pack_std(mdb, part, partdes)
+    wt = std['weights']
+    qpb = std['qty_per_box']                              # QtyPerBoxSTD
     R, S, T, U, V = (_num(wt.get(k)) for k in ('R', 'S', 'T', 'U', 'V'))
-    W = int(_num(wt.get('W'))) or 1                       # BoxQtyPerPalletSTD
+    W = std['box_per_pallet']                             # BoxQtyPerPalletSTD
     dest_code = mdb.des_by_raw.get(dest, "")              # CheckDes (AV->AW)
     ts = ts or mdb.ts_by_fg.get(part, "")
     wi = mdb.wi_by_fg.get(part, "")
     po_qty = int(_num(po_qty))
 
-    if not qpb:
-        return {'ok': False, 'error': 'No packing (qty/box) data for this part/market',
-                'labels': []}
+    if not std['ok']:
+        return {'ok': False, 'error': std['error'] or 'No packing (qty/box) data for this part/market',
+                'std': std, 'labels': []}
 
     date_text = (today or datetime.date.today()).strftime("%y%m%d")
     vendor6 = str(vendor_code or "")[:6]
@@ -119,8 +122,9 @@ def build_box_labels(mdb, *, po, part, po_qty, dest, station, pii="", desc="",
         }
         labels.append({'box_no': i, 'box_qty': box_qty, 'lp': lp, 'd': d, 'sql_row': sql_row})
 
-    return {'ok': True, 'qpb': qpb, 'total': total, 'stack': b9, 'gw': b12,
-            'dest_code': dest_code, 'wi': wi, 'ts': ts, 'partdes': partdes, 'labels': labels}
+    return {'ok': True, 'qpb': qpb, 'bpp': W, 'total': total, 'stack': b9, 'gw': b12,
+            'dest_code': dest_code, 'wi': wi, 'ts': ts, 'partdes': partdes,
+            'std': std, 'labels': labels}
 
 
 def render_zpl(label_d, rotate=None):
