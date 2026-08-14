@@ -1,0 +1,3549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{ area }} Control Board</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#171a24;--bg2:#20242f;--bg3:#2a2f3d;--bg4:#343a4a;
+  --border:#3a4054;--border2:#4c5468;
+  --text:#f7f8fc;--text2:#b0b6c9;--text3:#7d8399;
+  --green:#2fdb96;--green-dim:#0f5c3d;--green-bg:rgba(47,219,150,.14);
+  --amber:#ffb92e;--amber-dim:#7a5010;--amber-bg:rgba(255,185,46,.14);
+  --red:#ff6363;--red-dim:#7a2020;--red-bg:rgba(255,99,99,.14);
+  --blue:#63a8ff;--blue-dim:#1a3a60;--blue-bg:rgba(99,168,255,.14);
+  --purple:#bd93f0;--purple-dim:#3d2a5a;
+  --primary:var(--green);--primary-dim:var(--green-dim);--primary-bg:var(--green-bg);
+  --r:6px;--rl:10px;--th:94px;--sb:44px;
+}
+
+/* ── Themes — swap via data-theme attribute on <html> ──────────────────────── */
+[data-theme="light"] {
+  --bg:#f3f4f8;--bg2:#ffffff;--bg3:#eef0f5;--bg4:#e3e6ee;
+  --border:#dadde5;--border2:#c3c8d4;
+  --text:#191c26;--text2:#4c5266;--text3:#7a8096;
+  --green:#0f9d63;--green-dim:#d1f5e6;--green-bg:rgba(15,157,99,.12);
+  --amber:#b8720a;--amber-dim:#fdecc8;--amber-bg:rgba(184,114,10,.12);
+  --red:#d92d2d;--red-dim:#fbdada;--red-bg:rgba(217,45,45,.12);
+  --blue:#1d5fc4;--blue-dim:#d6e6fb;--blue-bg:rgba(29,95,196,.1);
+  --purple:#7c4dc4;--purple-dim:#e8dcf7;
+  --primary:var(--green);--primary-dim:var(--green-dim);--primary-bg:var(--green-bg);
+}
+[data-theme="bright-green"] {
+  --bg:#eff9f2;--bg2:#ffffff;--bg3:#e2f5e9;--bg4:#cfecdb;
+  --border:#bfe3cb;--border2:#9fd4b2;
+  --text:#0f2818;--text2:#2f5c40;--text3:#5c8a6c;
+  --green:#0eb85c;--green-dim:#c8f0d8;--green-bg:rgba(14,184,92,.16);
+  --amber:#b8720a;--amber-dim:#fdecc8;--amber-bg:rgba(184,114,10,.12);
+  --red:#d92d2d;--red-dim:#fbdada;--red-bg:rgba(217,45,45,.12);
+  --blue:#1d5fc4;--blue-dim:#d6e6fb;--blue-bg:rgba(29,95,196,.1);
+  --purple:#7c4dc4;--purple-dim:#e8dcf7;
+  --primary:var(--green);--primary-dim:var(--green-dim);--primary-bg:var(--green-bg);
+}
+[data-theme="bright-blue"] {
+  --bg:#eef4fb;--bg2:#ffffff;--bg3:#e0ecf9;--bg4:#cce0f5;
+  --border:#bcd6f0;--border2:#96bfe8;
+  --text:#0d2038;--text2:#2c4d70;--text3:#5a7ca0;
+  --green:#0f9d63;--green-dim:#d1f5e6;--green-bg:rgba(15,157,99,.12);
+  --amber:#b8720a;--amber-dim:#fdecc8;--amber-bg:rgba(184,114,10,.12);
+  --red:#d92d2d;--red-dim:#fbdada;--red-bg:rgba(217,45,45,.12);
+  --blue:#1362d6;--blue-dim:#cfe2fa;--blue-bg:rgba(19,98,214,.14);
+  --purple:#7c4dc4;--purple-dim:#e8dcf7;
+  --primary:var(--blue);--primary-dim:var(--blue-dim);--primary-bg:var(--blue-bg);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;font-size:15px;height:100vh;overflow:hidden}
+.topbar{display:flex;flex-direction:column;justify-content:center;height:var(--th);background:var(--bg2);border-bottom:1px solid var(--border)}
+.topbar-row1{display:flex;align-items:center;gap:10px;padding:0 14px;height:48px;flex-shrink:0}
+.area-tag{font-family:'IBM Plex Mono',monospace;font-size:21px;font-weight:500;color:var(--green)}
+.topbar-title{font-size:13px;color:var(--text2)}
+.sp{flex:1}
+.chip{font-size:12px;padding:3px 9px;border-radius:20px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);white-space:nowrap}
+.chip.g{background:var(--green-bg);border-color:var(--green-dim);color:var(--green)}
+.chip.a{background:var(--amber-bg);border-color:var(--amber-dim);color:var(--amber)}
+.chip.r{background:var(--red-bg);border-color:var(--red-dim);color:var(--red)}
+.chip.pulse::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;animation:blink 1.6s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.btn{font-size:12px;padding:5px 11px;border-radius:var(--r);cursor:pointer;border:1px solid var(--border2);background:var(--bg3);color:var(--text)}
+select.btn{font-family:inherit;appearance:none;-webkit-appearance:none;padding-right:22px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237d8399'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center}
+.btn:hover{background:var(--bg4)}
+.btn.p{background:var(--primary-bg);border-color:var(--primary-dim);color:var(--primary)}
+.btn.p:hover{filter:brightness(1.15)}
+
+.layout{display:flex;height:calc(100vh - var(--th) - var(--sb));overflow:hidden}
+
+/* worker panel */
+.wpanel{width:170px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column}
+/* queue panel */
+.qpanel{width:270px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column}
+.phdr{padding:8px 12px;border-bottom:1px solid var(--border);font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);display:flex;justify-content:space-between;align-items:center}
+.bdg{background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:1px 7px;font-size:11px;color:var(--text2)}
+.wlist,.qlist{flex:1;overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:5px;transition:background .15s,box-shadow .15s}
+.qlist.pool-drop-target{background:var(--red-bg);box-shadow:inset 0 0 0 2px var(--red-dim)}
+.wlist::-webkit-scrollbar,.qlist::-webkit-scrollbar{width:3px}
+.wlist::-webkit-scrollbar-thumb,.qlist::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+/* worker chip */
+.wchip{border-radius:var(--r);border:1px solid var(--border2);background:var(--bg3);padding:7px 10px;cursor:grab;user-select:none;position:relative}
+.wchip:active{cursor:grabbing}
+.wchip.dim{opacity:.45}
+.wchip .wn{font-size:13px;color:var(--text)}
+.wchip .wi{font-size:11px;color:var(--text3);font-family:'IBM Plex Mono',monospace;margin-top:1px}
+.wchip .wshift{position:absolute;bottom:5px;right:7px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;letter-spacing:.02em}
+.wchip .wshift.s-ca1{background:var(--blue-bg);color:var(--blue)}
+.wchip .wshift.s-ca2{background:var(--purple-dim);color:var(--purple)}
+.wchip .wshift.s-hc{background:var(--green-bg);color:var(--green)}
+
+/* PDO card */
+.card{border-radius:var(--r);border:1px solid var(--border2);background:var(--bg3);padding:12px 12px 10px 15px;cursor:grab;user-select:none;position:relative;transition:background .15s,border-color .15s,box-shadow .15s,transform .1s}
+.card.selectable{cursor:text;user-select:text;background:var(--bg4);box-shadow:0 0 0 2px var(--primary),0 4px 14px rgba(0,0,0,.28)}
+.card.selectable *{user-select:text;cursor:text}
+.card.selectable .crm,.card.selectable .cnte{cursor:pointer}
+.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:var(--r) 0 0 var(--r)}
+.card.ph::before{background:var(--red)}
+.card.pm::before{background:var(--amber)}
+.card.pl::before{background:var(--green)}
+.card:hover{background:var(--bg4);border-color:var(--primary);box-shadow:0 0 0 1px var(--primary),0 4px 14px rgba(0,0,0,.28);transform:translateY(-1px)}
+.card:active{cursor:grabbing}
+.card.dragging{opacity:.2}
+.ctop{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:5px;gap:6px}
+.ctop-tags{display:flex;align-items:center;gap:5px;flex-shrink:0}
+.cid{font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:500;color:var(--text)}
+.cprio{font-size:11px;padding:2px 7px;border-radius:4px;font-weight:600;text-transform:uppercase;flex-shrink:0}
+.cprio.ph{background:var(--red-dim);color:var(--red)}
+.cprio.pm{background:var(--amber-dim);color:var(--amber)}
+.cprio.pl{background:var(--green-dim);color:var(--green)}
+.crecv{font-size:10.5px;padding:2px 6px;border-radius:4px;font-weight:600;white-space:nowrap;flex-shrink:0}
+.crecv.ok{background:var(--green-bg);color:var(--green)}
+.crecv.warn{background:var(--red-bg);color:var(--red)}
+.cpart{font-size:13px;color:var(--text2);font-family:'IBM Plex Mono',monospace;margin-bottom:3px}
+.cdesc{font-size:12px;color:var(--text2);margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmeta{display:flex;justify-content:space-between;font-size:12px;color:var(--text3);margin-bottom:3px}
+.cship{font-size:12px;color:var(--text3)}
+.cnote{margin-top:4px;font-size:11px;color:var(--amber);font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cprog{margin-top:6px;height:3px;border-radius:2px;background:var(--border2);overflow:hidden}
+.cprog-bar{height:100%;border-radius:2px;background:var(--green);transition:width .4s}
+.crm{position:absolute;top:6px;right:6px;background:transparent;border:none;color:var(--text3);cursor:pointer;font-size:16px;padding:2px 5px;border-radius:3px;display:none;line-height:1}
+.card:hover .crm{display:block}
+.crm:hover{color:var(--red);background:var(--red-bg)}
+.cnte{position:absolute;bottom:6px;right:6px;background:transparent;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 5px;border-radius:3px;display:none;line-height:1}
+.card:hover .cnte{display:block}
+.cnte:hover{color:var(--amber);background:var(--amber-bg)}
+.csplit{position:absolute;top:32px;right:6px;background:transparent;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 5px;border-radius:3px;display:none;line-height:1}
+.card:hover .csplit{display:block}
+.csplit:hover{color:var(--blue);background:var(--blue-bg)}
+.cprint{position:absolute;top:32px;right:30px;background:transparent;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:2px 5px;border-radius:3px;display:none;line-height:1}
+.card:hover .cprint{display:block}
+.cprint:hover{color:var(--green);background:var(--green-bg)}
+.csplitbadge{position:absolute;top:32px;right:6px;font-size:10.5px;padding:2px 6px;border-radius:4px;font-weight:700;white-space:nowrap;flex-shrink:0;background:var(--purple-dim);color:var(--purple);cursor:pointer}
+.csplitbadge:hover{filter:brightness(1.2)}
+
+/* stations */
+.sarea{flex:1;overflow-y:auto;overflow-x:hidden;padding:12px 14px}
+.srow{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start}
+.scol{width:250px;flex-shrink:0;border-radius:var(--rl);border:1px solid var(--border);background:var(--bg2);overflow:hidden;transition:border-color .2s,box-shadow .2s,transform .15s}
+.scol.active{border-color:var(--green-dim)}
+.scol:hover{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary),0 6px 18px rgba(0,0,0,.3);transform:translateY(-2px)}
+.shead{padding:7px 12px;background:var(--bg3);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.sid{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:500;color:var(--text)}
+.sdot{width:8px;height:8px;border-radius:50%}
+.sdot.on{background:var(--green);box-shadow:0 0 6px var(--green)}
+.sdot.off{background:var(--text3)}
+.sworkers{padding:6px 10px;min-height:40px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;border-bottom:1px solid var(--border);transition:background .15s}
+.sworkers.over{background:rgba(155,114,207,.15);outline:1px dashed var(--purple)}
+.sworkers.empty::after{content:attr(data-hint);font-size:11px;color:var(--text3);font-style:italic}
+.wtag{font-size:12px;padding:3px 8px;border-radius:10px;background:var(--purple-dim);color:var(--purple);display:flex;align-items:center;gap:4px}
+.wtag.t-ca1{background:var(--blue-dim);color:var(--blue)}
+.wtag.t-ca2{background:var(--purple-dim);color:var(--purple)}
+.wtag.t-hc{background:var(--green-dim);color:var(--green)}
+.wtag .x{cursor:pointer;opacity:.5;font-size:13px;line-height:1}
+.wtag .x:hover{opacity:1;color:var(--red)}
+.etc{padding:5px 10px;border-bottom:1px solid var(--border);display:flex;align-items:baseline;gap:8px}
+.etc-lbl{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em}
+.etc-val{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:500;color:var(--text3)}
+.etc-val.urg{color:var(--red)}
+.etc-val.soon{color:var(--amber)}
+.etc-val.ok{color:var(--green)}
+.etc-block{border-bottom:1px solid var(--border)}
+.etc-block .etc{border-bottom:none;padding:4px 10px}
+.etc-block .etc:first-child{padding-top:6px}
+.etc-block .etc:last-child{padding-bottom:6px}
+.etc-val.qc{color:var(--blue)}
+
+/* queue expand toggle */
+.qmore{padding:6px 10px;font-size:12px;color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);background:var(--bg3);user-select:none}
+.qmore:hover{background:var(--bg4)}
+.qmore .arrow{transition:transform .15s;font-size:10px;color:var(--text3)}
+.qmore.expanded .arrow{transform:rotate(180deg)}
+
+/* expanded queue rows */
+.qexpand{max-height:180px;overflow-y:auto;border-bottom:1px solid var(--border)}
+.qexpand.full-mode{max-height:none;overflow-y:visible}
+.qexpand::-webkit-scrollbar{width:3px}
+.qexpand::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+.qrow{display:flex;align-items:center;gap:6px;padding:5px 10px;border-bottom:1px solid var(--border);cursor:grab;transition:background .1s,opacity .15s}
+.qrow:last-child{border-bottom:none}
+.qrow:hover{background:var(--bg3)}
+.qrow.dragging{opacity:.25}
+.qrow-handle{color:var(--text3);font-size:12px;cursor:grab;flex-shrink:0}
+.qrow-id{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text);flex-shrink:0}
+.qrow-qty{font-size:11px;color:var(--text3);flex:1;text-align:right}
+.qrow-rm{background:transparent;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:1px 4px;border-radius:3px;flex-shrink:0}
+.qrow-rm:hover{color:var(--red);background:var(--red-bg)}
+.qrow.over-top{border-top:2px solid var(--blue)}
+.qrow.over-bot{border-bottom:2px solid var(--blue)}
+.card.over-top{box-shadow:0 -3px 0 0 var(--blue)}
+.card.over-bot{box-shadow:0 3px 0 0 var(--blue)}
+
+/* search boxes */
+.psearch{padding:6px 8px;border-bottom:1px solid var(--border)}
+.psearch input{width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:6px 9px;font-size:12px;font-family:inherit}
+.psearch input::placeholder{color:var(--text3)}
+.psearch input:focus{outline:none;border-color:var(--blue)}
+
+/* bins — key: no pointer-events on children, hover handled on bin itself */
+.bin{padding:8px;min-height:100px;border-bottom:1px solid var(--border);transition:background .1s;position:relative}
+.bin:last-child{border-bottom:none}
+.bin.over-g{background:var(--green-bg);outline:1px dashed var(--green-dim)}
+.bin.over-b{background:var(--blue-bg);outline:1px dashed var(--blue-dim)}
+.blbl{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin-bottom:5px;display:flex;align-items:center;gap:4px;pointer-events:none}
+.dot-g{width:5px;height:5px;border-radius:50%;background:var(--green)}
+.dot-b{width:5px;height:5px;border-radius:50%;background:var(--blue)}
+.bempty{border:1px dashed var(--border);border-radius:var(--r);padding:16px 8px;text-align:center;color:var(--text3);font-size:12px;pointer-events:none}
+
+/* simbar */
+.simbar{position:fixed;bottom:0;left:0;right:0;height:var(--sb);background:var(--bg2);border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 16px;z-index:200}
+
+/* flat shift timeline — merged into the header */
+.shift-timeline{position:relative;height:34px;margin:0 16px 10px}
+.tl-track{position:absolute;inset:0;border-radius:var(--r);overflow:hidden;display:flex}
+.tl-seg{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;flex-shrink:0}
+.tl-seg.ca1{background:var(--blue)}
+.tl-seg.ca2{background:var(--purple)}
+.tl-seg.overlap{background:var(--amber)}
+.tl-seg.hc{background:var(--green)}
+.tl-name{font-size:14px;font-weight:600;line-height:1.1}
+.tl-time{font-size:10.5px;opacity:.85;font-family:'IBM Plex Mono',monospace;line-height:1.1}
+.tl-now{position:absolute;top:-9px;bottom:-9px;width:4px;background:var(--green);z-index:5;box-shadow:0 0 5px rgba(47,219,150,.7);border-radius:2px}
+.tl-now-label{position:absolute;top:-31px;left:50%;transform:translateX(-50%);font-size:12px;font-weight:700;font-family:'IBM Plex Mono',monospace;color:var(--green);white-space:nowrap}
+.tl-edge{position:absolute;bottom:2px;font-size:9.5px;font-family:'IBM Plex Mono',monospace;color:rgba(255,255,255,.65);z-index:3}
+.tl-edge.left{left:6px}
+.tl-edge.right{right:6px}
+
+.simbar select,.simbar input[type=number]{font-size:12px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:var(--r);padding:4px 8px}
+.ssp{flex:1}
+
+/* overlay / modal */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:500;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}
+.ov.show{opacity:1;pointer-events:all}
+.modal{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:22px;width:360px;max-width:95vw}
+.modal h3{font-size:15px;font-weight:500;margin-bottom:14px}
+.modal label{font-size:12px;color:var(--text2);display:block;margin-bottom:5px}
+.modal textarea{width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:9px;font-size:13px;resize:vertical;min-height:80px;font-family:inherit}
+.modal input[type=number]{width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px 10px;font-size:14px}
+.mbtns{display:flex;gap:8px;margin-top:14px}
+.mbtns .btn{flex:1;text-align:center;padding:7px}
+
+.stn-list{max-height:260px;overflow-y:auto}
+.stn-row{display:flex;justify-content:space-between;align-items:center;padding:8px 4px;border-bottom:1px solid var(--border)}
+.stn-row:last-child{border-bottom:none}
+.stn-id{font-family:'IBM Plex Mono',monospace;font-size:14px;color:var(--text)}
+.stn-rm{font-size:11px;padding:4px 10px;border-radius:var(--r);cursor:pointer;border:1px solid var(--border2);background:var(--bg3);color:var(--text2)}
+.stn-rm:hover{background:var(--red-bg);color:var(--red);border-color:var(--red-dim)}
+.stn-rm.warn{background:var(--amber-bg);color:var(--amber);border-color:var(--amber-dim)}
+
+.split-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)}
+.split-row:last-child{border-bottom:none}
+.split-letter{width:26px;height:26px;border-radius:50%;background:var(--purple-dim);color:var(--purple);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0}
+.split-row select{flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:7px 9px;font-size:13px;font-family:'IBM Plex Mono',monospace}
+.split-locked-station{flex:1;background:var(--green-bg);border:1px solid var(--green-dim);border-radius:var(--r);color:var(--green);padding:7px 9px;font-size:13px;font-family:'IBM Plex Mono',monospace;font-weight:600}
+.split-row input[type=number]{width:90px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:7px 9px;font-size:13px}
+/* No spinner arrows on the split qty box — plain typed input only. */
+.split-qty-input::-webkit-outer-spin-button,.split-qty-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.split-qty-input{-moz-appearance:textfield;appearance:textfield}
+.split-row-rm{background:transparent;border:none;color:var(--text3);cursor:pointer;font-size:15px;padding:2px 6px;flex-shrink:0}
+.split-row-rm:hover{color:var(--red)}
+.split-credit-hint{font-size:10.5px;color:var(--green);white-space:nowrap;flex-shrink:0}
+
+/* Attendance Gantt modal */
+.gantt-modal{width:min(920px, 92vw); max-height:85vh; display:flex; flex-direction:column}
+#gantt-body{flex:1; overflow-y:auto; border:1px solid var(--border); border-radius:var(--r); margin:6px 0}
+.gantt-header{position:sticky; top:0; z-index:2; display:flex; background:var(--bg3); border-bottom:1px solid var(--border); padding:6px 0 6px 160px; font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text3)}
+.gantt-header span{position:absolute}
+.gantt-rows{position:relative}
+.gantt-row{display:flex; align-items:center; padding:5px 0; border-bottom:1px solid var(--border); position:relative}
+.gantt-row:last-child{border-bottom:none}
+.gantt-row:hover{background:var(--bg3)}
+.gantt-name{width:160px; flex-shrink:0; padding:0 10px; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.gantt-name .gid{display:block; font-size:10px; color:var(--text3); font-family:'IBM Plex Mono',monospace}
+.gantt-track{flex:1; position:relative; height:22px; background:var(--bg3); border-radius:4px; margin-right:10px}
+.gantt-bar{position:absolute; top:2px; bottom:2px; border-radius:4px; display:flex; align-items:center; padding:0 6px; font-size:10px; color:#fff; font-weight:600; white-space:nowrap; overflow:hidden}
+.gantt-bar.ca1{background:var(--blue)}
+.gantt-bar.ca2{background:var(--purple)}
+.gantt-bar.hc{background:var(--green)}
+.gantt-now-line{position:absolute; top:0; bottom:0; width:2px; background:#ffd76a; z-index:3; opacity:.9}
+.gantt-name .gnote{display:inline-block; margin-top:2px; font-size:9px; font-weight:700; letter-spacing:.02em; padding:1px 5px; border-radius:4px; white-space:nowrap}
+.gantt-name .gnote.lent{background:var(--amber-dim); color:var(--amber)}
+.gantt-name .gnote.borrowed{background:var(--green-bg); color:var(--green)}
+.gantt-name .gnote.note-win{background:var(--bg3); color:var(--blue); border:1px solid var(--blue)}
+.gantt-row.lent-away{opacity:.6}
+.gantt-row.lent-away .gantt-bar{background:repeating-linear-gradient(45deg,var(--text3),var(--text3) 4px,transparent 4px,transparent 8px)}
+.gantt-legend{display:flex; gap:16px; padding:4px 2px; font-size:11px; color:var(--text2)}
+.gantt-swatch{display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:middle}
+.gantt-empty{padding:30px; text-align:center; color:var(--text3); font-size:12px}
+
+
+/* toast */
+.toast{position:fixed;bottom:56px;right:16px;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:9px 15px;font-size:13px;opacity:0;transform:translateY(6px);transition:opacity .2s,transform .2s;pointer-events:none;z-index:600;max-width:320px}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.ok{border-color:var(--green-dim);color:var(--green)}
+.toast.warn{border-color:var(--amber-dim);color:var(--amber)}
+.toast.err{border-color:var(--red-dim);color:var(--red)}
+
+/* CS1.6-style blocky loading overlay — shown during manual refresh actions
+   (Refresh orders / Refresh FG now) instead of the small toast, since these
+   are deliberate user-triggered waits worth a clearer visual. */
+.loadbar-overlay{position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:900}
+.loadbar-overlay.show{display:flex}
+.loadbar-panel{background:var(--bg2); border:1px solid var(--border2); border-radius:var(--rl); padding:26px 32px; min-width:340px; text-align:center; box-shadow:0 12px 40px rgba(0,0,0,.4)}
+.loadbar-title{font-size:13px; font-weight:700; color:var(--text); text-transform:uppercase; letter-spacing:.06em; margin-bottom:16px}
+.loadbar-bar{display:flex; gap:3px; height:22px; background:#0c0e14; border:1px solid var(--border2); border-radius:4px; padding:2px}
+.loadbar-seg{flex:1; background:#242938; border-radius:1px; transition:background .1s}
+.loadbar-seg.filled{background:var(--green)}
+.loadbar-status{margin-top:12px; font-size:11.5px; font-family:'IBM Plex Mono',monospace; color:var(--green); min-height:14px}
+
+/* persistent Excel status banner — stays until dismissed, unlike toast */
+.psb{
+  position:fixed; top:56px; left:50%; transform:translateX(-50%) translateY(-12px);
+  background:var(--bg2); border:1px solid var(--amber-dim); border-left:4px solid var(--amber);
+  border-radius:var(--rl); padding:12px 14px; display:flex; align-items:flex-start; gap:10px;
+  max-width:420px; box-shadow:0 8px 24px rgba(0,0,0,.4);
+  opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:800;
+}
+.psb.show{opacity:1; transform:translateX(-50%) translateY(0); pointer-events:all}
+.psb-icon{font-size:19px; flex-shrink:0; line-height:1}
+.psb-body{flex:1}
+.psb-title{font-size:14px; font-weight:600; color:var(--text); margin-bottom:3px}
+.psb-text{font-size:12px; color:var(--text2); line-height:1.4}
+.psb-close{background:transparent; border:none; color:var(--text3); cursor:pointer; font-size:15px; padding:2px 4px; border-radius:3px; flex-shrink:0}
+.psb-close:hover{color:var(--text); background:var(--bg3)}
+
+/* Report view modal */
+.report-modal{width:min(1850px, 98vw); height:96vh; max-height:96vh; display:flex; flex-direction:column; padding-top:12px}
+.report-modal h3{margin-bottom:8px}
+.report-filters{display:flex; flex-wrap:wrap; gap:10px; align-items:end; padding:10px 0; border-bottom:1px solid var(--border)}
+.report-fgroup{display:flex; flex-direction:column; gap:4px}
+.report-fgroup label{font-size:9.5px; color:var(--text3); text-transform:uppercase; letter-spacing:.05em; font-weight:600}
+.report-fgroup input,.report-fgroup select{background:var(--bg3); border:1px solid var(--border2); border-radius:var(--r); color:var(--text); padding:6px 9px; font-size:12px; font-family:'IBM Plex Mono',monospace}
+.report-fgroup input[type=date]{color-scheme:dark}
+.report-stats{display:flex; gap:10px; padding:10px 0}
+.report-stat{flex:1; background:var(--bg3); border:1px solid var(--border); border-radius:var(--r); padding:10px 14px}
+.report-stat-label{font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px}
+.report-stat-value{font-size:20px; font-weight:700; font-family:'IBM Plex Mono',monospace}
+.report-chart-wrap{position:relative; height:auto; background:var(--bg3); border:1px solid var(--border); border-radius:var(--r); padding:8px 10px 10px}
+/* Canvas gets its OWN fixed-height, canvas-only box. This is the documented fix
+   for Chart.js's "infinite height growth" bug: a responsive chart with
+   maintainAspectRatio:false must live in a position:relative container with a
+   fixed height and no siblings, or it keeps re-measuring itself taller on every
+   re-render (which is what happened when typing in a column filter). */
+.report-chart-canvas-box{position:relative; height:210px; width:100%; margin-top:6px}
+.report-chart-wrap.collapsed{padding:8px 10px}
+.report-chart-wrap.collapsed .report-chart-head{margin-bottom:0}
+.report-chart-wrap.collapsed .report-chart-canvas-box{display:none}
+.report-chart-head{display:flex; align-items:center; gap:10px; margin-bottom:2px}
+.report-chart-toggle{display:flex; gap:3px; margin-left:auto; background:var(--bg2); border-radius:var(--r); padding:2px}
+.report-chart-toggle button{font-size:10.5px; padding:4px 10px; border:none; background:transparent; color:var(--text3); cursor:pointer; border-radius:4px}
+.report-chart-toggle button.active{background:var(--green-bg); color:var(--green)}
+.report-chart-collapse-btn{font-size:10.5px; padding:4px 10px; border:1px solid var(--border2); background:var(--bg2); color:var(--text3); cursor:pointer; border-radius:var(--r); margin-left:8px}
+.report-chart-collapse-btn:hover{color:var(--text)}
+.report-table-wrap{flex:1; overflow:auto; border:1px solid var(--border); border-radius:var(--r); margin-top:22px}
+.report-table{width:100%; border-collapse:collapse; font-size:11.5px}
+.report-table th{position:sticky; top:0; background:var(--bg3); text-align:left; padding:8px 10px; font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:var(--text3); border-bottom:1px solid var(--border); cursor:pointer; white-space:nowrap; user-select:none; z-index:1}
+.report-table th:hover{color:var(--text)}
+.report-table td{padding:7px 10px; border-bottom:1px solid var(--border); white-space:nowrap; font-family:'IBM Plex Mono',monospace}
+.report-table tr:hover td{background:var(--bg3)}
+.report-po-cell{font-weight:600}
+.report-desc-cell{font-family:'IBM Plex Sans',sans-serif; max-width:200px; overflow:hidden; text-overflow:ellipsis}
+.report-days{font-weight:600}
+.report-days.urg{color:var(--red)}
+.report-days.soon{color:var(--amber)}
+.report-days.ok{color:var(--green)}
+.report-station-select{background:var(--bg3); border:1px solid var(--border2); border-radius:var(--r); color:var(--text); padding:4px 7px; font-size:11px; font-family:'IBM Plex Mono',monospace; cursor:pointer}
+tr.report-row-assigned{box-shadow:inset 3px 0 0 var(--green)}
+tr.report-row-assigned .report-station-select{color:var(--green); border-color:var(--green-dim); background:var(--green-bg)}
+
+/* clickable priority tag + popup menu */
+.cprio.cprio-click{cursor:pointer}
+.cprio.cprio-click:hover{filter:brightness(1.15);outline:1px solid var(--border2)}
+.prio-menu{position:fixed;z-index:1000;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r);box-shadow:0 8px 24px rgba(0,0,0,.4);padding:4px;display:flex;flex-direction:column;min-width:120px}
+.prio-menu button{background:transparent;border:none;color:var(--text);text-align:left;padding:7px 12px;font-size:12px;cursor:pointer;border-radius:4px;font-family:inherit}
+.prio-menu button:hover{background:var(--bg3)}
+
+/* SAMPLE badge + report LP/sample tags */
+.csample{font-size:10px;font-weight:700;letter-spacing:.04em;padding:2px 6px;border-radius:4px;background:var(--purple-dim);color:var(--purple);flex-shrink:0}
+/* NG (defective) marker — red octagon (stop-sign) with white NG text. */
+.cng{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;flex-shrink:0;background:#e01e1e;color:#fff;font-size:9px;font-weight:800;letter-spacing:.02em;clip-path:polygon(30% 0%,70% 0%,100% 30%,100% 70%,70% 100%,30% 100%,0% 70%,0% 30%)}
+.rep-tag{font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:4px;margin-left:5px;vertical-align:middle;user-select:none;-webkit-user-select:none}
+.rep-tag.sample{background:var(--purple-dim);color:var(--purple)}
+.rep-tag.lp-yes{background:var(--green-bg);color:var(--green);border:1px solid var(--green-dim)}
+.rep-tag.lp-no{background:var(--red-bg);color:var(--red);border:1px solid var(--red-dim)}
+.rep-tag.recv-yes{background:var(--green-bg);color:var(--green);border:1px solid var(--green-dim)}
+.rep-tag.recv-no{background:var(--red-bg);color:var(--red);border:1px solid var(--red-dim)}
+.report-po-num{user-select:text}
+
+/* Excel-style column filter button + popup */
+.col-filter-btn{width:100%;text-align:left;background:var(--bg2);border:1px solid var(--border2);border-radius:4px;color:var(--text3);cursor:pointer;font-size:10px;padding:3px 6px;font-family:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.col-filter-btn:hover{background:var(--bg4);color:var(--text)}
+.col-filter-btn.active{color:var(--blue);border-color:var(--blue);background:var(--blue-bg)}
+.col-filter-pop{position:fixed;z-index:1100;background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);box-shadow:0 12px 34px rgba(0,0,0,.5);width:262px;max-height:372px;display:flex;flex-direction:column;padding:8px}
+.col-filter-pop .cf-search{background:var(--bg3);border:1px solid var(--border2);border-radius:4px;color:var(--text);padding:6px 8px;font-size:12px;margin-bottom:6px;font-family:inherit}
+.col-filter-pop .cf-search:focus{outline:none;border-color:var(--blue)}
+.col-filter-actions{display:flex;gap:6px;margin-bottom:6px}
+.col-filter-actions button{flex:1;font-size:10.5px;padding:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);border-radius:4px;cursor:pointer;font-family:inherit}
+.col-filter-actions button:hover{background:var(--bg4);color:var(--text)}
+.cf-list{overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:1px;min-height:60px}
+.cf-item{display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:12px;cursor:pointer;border-radius:4px;white-space:nowrap;overflow:hidden}
+.cf-item:hover{background:var(--bg3)}
+.cf-item span{overflow:hidden;text-overflow:ellipsis}
+.cf-item input{cursor:pointer;flex-shrink:0}
+.col-filter-done{margin-top:7px;font-size:11px;padding:6px;border:none;background:var(--primary-bg);color:var(--primary);border-radius:4px;cursor:pointer;font-family:inherit;font-weight:600}
+.col-filter-done:hover{filter:brightness(1.12)}
+
+/* upcoming (next-shift, not-yet-active) worker chip */
+.wchip.upcoming{opacity:.72;border-style:dashed}
+.wsoon{position:absolute;top:5px;right:7px;font-size:8.5px;font-weight:700;padding:1px 5px;border-radius:4px;background:var(--amber-bg);color:var(--amber);letter-spacing:.03em}
+.wtag.soon{opacity:.6;font-style:italic}
+.wtag{cursor:grab;user-select:none}
+.wtag:active{cursor:grabbing}
+.wtag.dragging{opacity:.3}
+
+
+/* report per-column filter row */
+.report-filter-row th{position:sticky;top:30px;background:var(--bg3);padding:3px 6px;z-index:1;border-bottom:1px solid var(--border)}
+/* Finished report: bigger Note column (wraps, wider) */
+.fin-note-cell{font-family:'IBM Plex Sans',sans-serif;white-space:normal;min-width:240px;max-width:420px}
+
+/* ── Same-day at-risk alert (due today, unfinished, past 14:00) ── */
+@keyframes riskPulse   { 0%,100%{opacity:1} 50%{opacity:.45} }
+@keyframes riskBorder  { 0%,100%{box-shadow:0 0 0 2px var(--red), 0 0 12px 2px rgba(255,93,93,.55)}
+                         50%{box-shadow:0 0 0 2px rgba(255,93,93,.35), 0 0 4px 1px rgba(255,93,93,.2)} }
+.risk-banner{margin:0 0 8px;background:var(--red-dim,#7a2020);border:1px solid var(--red,#ff5d5d);
+  border-radius:8px;padding:8px 14px;color:#fff;font-size:13px;font-weight:600;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;animation:riskPulse 1.1s infinite}
+.risk-banner .risk-ic{font-size:17px}
+.risk-banner .risk-item{background:rgba(0,0,0,.25);border-radius:6px;padding:2px 8px;font-family:'IBM Plex Mono',monospace;
+  font-weight:700;white-space:nowrap}
+.risk-banner .risk-item .rw{opacity:.8;font-weight:500;margin-left:5px}
+/* Station column pulses red while it holds an at-risk order */
+.scol.at-risk{border-radius:10px;animation:riskBorder 1.1s infinite}
+.scol.at-risk .shead .sid::after{content:' ⚠';color:var(--red,#ff5d5d)}
+
+/* ── Planned Capacity setup window (bigger + slightly larger text) ── */
+#ov-planned .modal{font-size:14px}
+#ov-planned h3{font-size:17px}
+#ov-planned label{font-size:13px;color:var(--text2)}
+#ov-planned .report-table th,#ov-planned .report-table td{font-size:13.5px;padding:6px 10px}
+#ov-planned input[type=number]{font-size:14px;padding:6px 8px}
+#ov-planned select{font-size:14px;padding:6px 8px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text)}
+#ov-planned input[type=date]{font-size:14px}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+</head>
+<body>
+<div id="dev-banner" style="display:none;position:fixed;top:0;right:10px;z-index:99999;pointer-events:none;background:rgba(184,134,11,.32);color:#ffcf6b;font-weight:700;font-size:10.5px;text-align:center;padding:2px 9px;letter-spacing:.3px;border:1px solid rgba(255,207,107,.4);border-top:none;border-radius:0 0 6px 6px;backdrop-filter:blur(1px)">🧪 DEV / TEST MODE — no big-screen feed · SQL writes dry-run</div>
+<div class="topbar">
+  <div class="topbar-row1">
+    <span class="area-tag">{{ area }}</span>
+    <span class="topbar-title" id="area-title">Production Control Board</span>
+    <span class="chip g pulse" id="c-shift">Ca1</span>
+    <span class="chip" id="c-time">--:--</span>
+    <span class="chip a" id="c-queue">-- queue</span>
+    <span class="chip r" id="c-idle">-- idle</span>
+    <div class="sp"></div>
+    <select class="btn" id="theme-select" onchange="setTheme(this.value)" title="Theme" style="cursor:pointer">
+      <option value="dark">🌙 Dark</option>
+      <option value="light">☀️ Light</option>
+      <option value="bright-green">🟢 Bright Green</option>
+      <option value="bright-blue">🔵 Bright Blue</option>
+    </select>
+    <select class="btn" id="lang-select" onchange="setLang(this.value)" title="Language" style="cursor:pointer">
+      <option value="en">🇬🇧 English</option>
+      <option value="vi">🇻🇳 Tiếng Việt</option>
+    </select>
+    <button class="btn" id="expand-all-btn" onclick="toggleExpandAll()" data-i18n="expand_all">⤢ Expand all queues</button>
+    <button class="btn" onclick="openReportModal()" data-i18n="report_view">📋 Report</button>
+    <button class="btn" onclick="openFinishedModal()" data-i18n="finished_view">✅ Finished</button>
+    <button class="btn" onclick="openGanttModal()" data-i18n="attendance_gantt">📊 Attendance</button>
+    <button class="btn" onclick="openStationMgmt()" data-i18n="manage_stations">⚙ Stations</button>
+    <button class="btn" onclick="openPrintSettings()" title="Printer + email settings for ticket/label printing">🖨 Print</button>
+    <button class="btn p" onclick="refreshPDOs()" data-i18n="refresh_orders">↻ Refresh orders</button>
+  </div>
+  <div class="shift-timeline" id="shift-timeline"></div>
+</div>
+
+<div class="layout">
+  <div class="wpanel">
+    <div class="phdr"><span data-i18n="workers">Workers</span> <span class="bdg" id="w-count">0</span></div>
+    <div class="psearch"><input type="text" id="w-search" data-i18n-ph="search_workers" placeholder="🔍 Search workers…" oninput="renderWorkers()"></div>
+    <div class="wlist" id="worker-pool"></div>
+  </div>
+  <div class="qpanel">
+    <div class="phdr"><span data-i18n="pdo_queue">PDO Queue</span> <span class="bdg" id="q-count">0</span></div>
+    <div class="psearch"><input type="text" id="q-search" data-i18n-ph="search_pdo" placeholder="🔍 Search PDO, part…" oninput="renderQueue()"></div>
+    <div class="qlist" id="pdo-queue"></div>
+  </div>
+  <div class="sarea">
+    <div class="risk-banner" id="risk-banner" style="display:none"></div>
+    <div class="srow" id="srow"></div>
+  </div>
+</div>
+
+<div class="simbar">
+  <span id="fg-status-lbl" style="font-size:11px;color:var(--text3)">FG: —</span>
+  <span id="ts-status-lbl" style="font-size:11px;color:var(--text3)">TimeStudy: —</span>
+  <button class="btn p" onclick="refreshFG()" data-i18n="refresh_fg_now">↻ Refresh FG now</button>
+  <div class="ssp"></div>
+  <span id="poll-lbl" style="font-size:11px;color:var(--text3);font-family:'IBM Plex Mono',monospace"><span data-i18n="next_fg_sync">Next FG sync in</span> <span id="poll-countdown">60</span>s</span>
+</div>
+
+<div class="ov" id="ov-note">
+  <div class="modal">
+    <h3>📝 <span data-i18n="note_title">Note</span> — <span id="note-lbl"></span></h3>
+    <div id="note-excel-context" style="display:none;margin-bottom:10px">
+      <label style="opacity:.7" data-i18n="excel_note_label">Excel note (read-only)</label>
+      <div id="note-excel-text" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);padding:8px 10px;font-size:12px;color:var(--text2);font-style:italic"></div>
+    </div>
+    <label data-i18n="web_note_label">Web note</label>
+    <textarea id="note-txt" data-i18n-ph="note_placeholder" placeholder="Add a note…"></textarea>
+    <div style="font-size:11px;color:var(--text3);margin-top:5px" data-i18n="note_merge_hint">Shown on the card as: Excel note (web note)</div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer;font-size:13px;color:var(--text)">
+      <input type="checkbox" id="note-ng-check" style="width:16px;height:16px;cursor:pointer">
+      <span data-i18n="mark_ng">Mark as NG (defective)</span>
+    </label>
+    <div class="mbtns">
+      <button class="btn" onclick="closeNote()" data-i18n="cancel">Cancel</button>
+      <button class="btn p" onclick="saveNote()" data-i18n="save">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="ov" id="ov-confirm">
+  <div class="modal" style="max-width:440px">
+    <h3 id="confirm-title" data-i18n="confirm_title">Please confirm</h3>
+    <p id="confirm-msg" style="font-size:13px;color:var(--text2);line-height:1.5;margin:6px 0 16px"></p>
+    <div class="mbtns">
+      <button class="btn" id="confirm-cancel" data-i18n="cancel">Cancel</button>
+      <button class="btn p" id="confirm-ok" data-i18n="confirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div class="ov" id="ov-stations">
+  <div class="modal" style="width:380px">
+    <h3>🏭 <span data-i18n="manage_stations_title">Manage stations</span></h3>
+    <div id="station-mgmt-list" class="stn-list"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <input type="text" id="new-station-input" placeholder="e.g. {{ area }}-13" style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px 10px;font-size:13px;font-family:'IBM Plex Mono',monospace" onkeydown="if(event.key==='Enter')addStation()">
+      <button class="btn p" onclick="addStation()" data-i18n="add">+ Add</button>
+    </div>
+    <div class="mbtns">
+      <button class="btn" onclick="closeStationMgmt()" data-i18n="close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="ov" id="ov-split">
+  <div class="modal" style="width:460px">
+    <h3>✂ <span data-i18n="split_title">Split</span> — <span id="split-pdo-label"></span></h3>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px" id="split-remaining-label"></div>
+    <div id="split-rows"></div>
+    <button class="btn" id="split-add-row-btn" onclick="addSplitRow()" style="margin-top:8px;font-size:12px" data-i18n="split_add_row">+ Add split</button>
+    <div id="split-total-line" style="margin-top:10px;font-size:12px;font-family:'IBM Plex Mono',monospace"></div>
+    <div class="mbtns">
+      <button class="btn" onclick="closeSplitModal()" data-i18n="cancel">Cancel</button>
+      <button class="btn p" id="split-confirm-btn" onclick="submitSplit()" data-i18n="split_confirm">Split</button>
+    </div>
+  </div>
+</div>
+
+<div class="ov" id="ov-merge">
+  <div class="modal" style="width:380px">
+    <h3>🔀 <span data-i18n="merge_title">Merge splits</span> — <span id="merge-pdo-label"></span></h3>
+    <label data-i18n="merge_target_label">Place merged order at</label>
+    <select id="merge-station-select" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px 10px;font-size:13px;font-family:'IBM Plex Mono',monospace"></select>
+    <div class="mbtns">
+      <button class="btn" onclick="closeMergeModal()" data-i18n="cancel">Cancel</button>
+      <button class="btn p" onclick="submitMerge()" data-i18n="merge_confirm">Merge</button>
+    </div>
+  </div>
+</div>
+
+<div class="ov" id="ov-gantt">
+  <div class="modal gantt-modal">
+    <h3>📊 <span data-i18n="attendance_gantt_title">Today's Attendance</span> — <span id="gantt-date-label"></span></h3>
+    <div id="gantt-body">
+      <div class="gantt-header" id="gantt-header"></div>
+      <div class="gantt-rows" id="gantt-rows"></div>
+    </div>
+    <div class="gantt-legend">
+      <span><span class="gantt-swatch" style="background:var(--blue)"></span> Ca 1</span>
+      <span><span class="gantt-swatch" style="background:var(--purple)"></span> Ca 2</span>
+      <span><span class="gantt-swatch" style="background:var(--green)"></span> HC</span>
+    </div>
+    <div class="mbtns">
+      <button class="btn" onclick="closeGanttModal()" data-i18n="close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="ov" id="ov-finished">
+  <div class="modal report-modal">
+    <h3>✅ <span data-i18n="finished_view_title">Finished PDOs</span></h3>
+    <div class="report-filters">
+      <button class="btn" onclick="clearFinFilters()" data-i18n="clear_filters">✕ Clear filters</button>
+      <div style="flex:1"></div>
+      <span id="fin-count" style="font-size:12px;color:var(--text3);align-self:center"></span>
+      <button class="btn p" onclick="loadFinished()" data-i18n="refresh_orders">↻ Refresh</button>
+    </div>
+    <div class="report-table-wrap" style="margin-top:10px">
+      <table class="report-table">
+        <thead><tr id="fin-table-head"></tr><tr id="fin-filter-row" class="report-filter-row"></tr></thead>
+        <tbody id="fin-table-body"></tbody>
+      </table>
+    </div>
+    <div class="mbtns">
+      <button class="btn" onclick="closeFinishedModal()" data-i18n="close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="ov" id="ov-planned" style="z-index:600">
+  <div class="modal" style="width:840px;max-width:97vw">
+    <h3>⚙ <span data-i18n="plan_title">Planned Capacity Setup</span></h3>
+    <div style="color:var(--text3);margin-bottom:12px;line-height:1.5" data-i18n="plan_intro">
+      Enter operators per day and mark OT. The Planned line = operators × net hours/op (none 6.73h · +2h 8.47h · +3h 9.08h). Saved automatically for this area.
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
+      <div><label data-i18n="plan_from">From</label><input type="date" id="plan-from" onchange="planBuildRows()"></div>
+      <div><label data-i18n="plan_to">To</label><input type="date" id="plan-to" onchange="planBuildRows()"></div>
+      <button class="btn p" onclick="planBuildRows()" data-i18n="plan_refresh">↻ Refresh</button>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:12px">
+      <div><label data-i18n="plan_ops">Operators</label><input type="number" min="0" step="1" id="plan-fill-ops" style="width:72px"></div>
+      <div><label>OT</label><select id="plan-fill-ot"><option value="0" data-i18n="ot_none">none</option><option value="2">+2h</option><option value="3">+3h</option></select></div>
+      <div><label data-i18n="plan_apply_to">Apply to</label><select id="plan-fill-scope"><option value="all" data-i18n="plan_scope_all">All days</option><option value="wd" data-i18n="plan_scope_wd">Weekdays</option><option value="we" data-i18n="plan_scope_we">Weekends</option></select></div>
+      <button class="btn" onclick="planQuickFill()" data-i18n="plan_apply_fill">Apply fill</button>
+      <div style="flex:1"></div>
+      <button class="btn" onclick="planClearRange()" data-i18n="plan_clear_range">Clear range</button>
+    </div>
+    <div style="max-height:50vh;overflow:auto;border:1px solid var(--border);border-radius:6px">
+      <table class="report-table" style="width:100%">
+        <thead><tr>
+          <th data-i18n="col_date">Date</th><th data-i18n="col_day">Day</th><th data-i18n="plan_ops">Operators</th><th>OT</th><th data-i18n="col_hours">Hours</th><th data-i18n="col_copy">Copy</th>
+        </tr></thead>
+        <tbody id="plan-tbody"></tbody>
+      </table>
+    </div>
+    <div style="margin-top:10px;color:var(--text2)"><span id="plan-summary"></span></div>
+    <div class="mbtns">
+      <button class="btn p" onclick="closePlannedModal()" data-i18n="plan_done">Done</button>
+    </div>
+  </div>
+</div>
+
+<div class="ov" id="ov-issue">
+  <div class="modal" style="width:440px;max-width:95vw">
+    <h3>🖨 <span>Issue ticket / label</span></h3>
+    <div id="issue-pdo" style="font-size:13px;color:var(--text2);margin-bottom:10px;font-family:'IBM Plex Mono',monospace"></div>
+    <label>Station</label>
+    <input id="issue-station" list="issue-stations" placeholder="e.g. PK-12"
+      style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px">
+    <datalist id="issue-stations"></datalist>
+    <div style="display:flex;gap:12px;margin-top:8px">
+      <div><label>Prod time — hour</label><input id="issue-proh" type="number" min="0" max="23" placeholder="00" style="width:80px"></div>
+      <div><label>minute</label><input id="issue-prom" type="number" min="0" max="59" placeholder="00" style="width:80px"></div>
+    </div>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:7px;font-size:13px">
+      <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" id="issue-bpt" checked> BPT packaging ticket <span style="color:var(--text3)">→ Canon (browser print)</span></label>
+      <label style="display:flex;align-items:center;gap:8px;color:var(--text)"><input type="checkbox" id="issue-box" checked> Box label + License Plate <span style="color:var(--text3)">→ Zebra</span></label>
+    </div>
+    <div id="issue-msg" style="font-size:12px;margin-top:10px;color:var(--text3);min-height:16px"></div>
+    <div class="mbtns">
+      <button class="btn" onclick="closeIssueModal()">Cancel</button>
+      <button class="btn p" id="issue-go" onclick="submitIssue()">Issue &amp; queue</button>
+    </div>
+  </div>
+</div>
+
+<div class="ov" id="ov-psettings">
+  <div class="modal" style="width:540px;max-width:96vw">
+    <h3>🖨 <span>Print settings</span></h3>
+    <datalist id="ps-printers"></datalist>
+    <label>Zebra printer (box label · ZPL)</label>
+    <input id="ps-zebra" list="ps-printers" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px">
+    <label style="margin-top:8px">Canon printer (BPT packaging ticket)</label>
+    <input id="ps-canon" list="ps-printers" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px">
+    <label style="margin-top:8px">MainDatabase.xlsx path</label>
+    <input id="ps-maindb" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px;font-family:'IBM Plex Mono',monospace;font-size:12px">
+    <label style="margin-top:8px">New-part email recipients (one per line, or ; / , separated)</label>
+    <textarea id="ps-email" style="width:100%;min-height:84px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px;font-size:12px"></textarea>
+    <div id="ps-msg" style="font-size:12px;margin-top:8px;color:var(--text3);min-height:16px"></div>
+    <div class="mbtns">
+      <button class="btn" onclick="closePrintSettings()">Close</button>
+      <button class="btn p" onclick="savePrintSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="ov" id="ov-report">
+  <div class="modal report-modal">
+    <h3>📋 <span data-i18n="report_view_title">PDO Report View</span></h3>
+
+    <div class="report-filters">
+      <div class="report-fgroup"><label data-i18n="recv_from">Receive from</label><input type="date" id="rf-recv-from"></div>
+      <div class="report-fgroup"><label data-i18n="recv_to">Receive to</label><input type="date" id="rf-recv-to"></div>
+      <div class="report-fgroup"><label data-i18n="ship_from">Ship from</label><input type="date" id="rf-ship-from"></div>
+      <div class="report-fgroup"><label data-i18n="ship_to">Ship to</label><input type="date" id="rf-ship-to"></div>
+      <div class="report-fgroup"><label data-i18n="part_search">Part / PO</label><input type="text" id="rf-part" style="width:130px"></div>
+      <div class="report-fgroup"><label data-i18n="vendor">Vendor</label><select id="rf-vendor"><option value="">—</option></select></div>
+      <div class="report-fgroup"><label data-i18n="received_label">Received</label>
+        <select id="rf-received">
+          <option value="">—</option>
+          <option value="yes" data-i18n="received_yes">Received only</option>
+          <option value="no" data-i18n="received_no">Not received only</option>
+        </select>
+      </div>
+      <div class="report-fgroup"><label data-i18n="assigned_label">Assigned</label>
+        <select id="rf-assigned">
+          <option value="">—</option>
+          <option value="yes" data-i18n="assigned_yes">Assigned only</option>
+          <option value="no" data-i18n="assigned_no">Unassigned only</option>
+        </select>
+      </div>
+      <button class="btn" onclick="clearReportFilters()" data-i18n="clear_filters">✕ Clear</button>
+      <button class="btn p" onclick="refreshReportData()" data-i18n="refresh_orders">↻ Refresh orders</button>
+    </div>
+
+    <div class="report-stats" id="report-stats"></div>
+
+    <div class="report-chart-wrap" id="report-chart-wrap-el">
+      <div class="report-chart-head">
+        <span style="font-size:11px;font-weight:600" data-i18n="hours_required_chart">Upcoming hours required</span>
+        <div class="report-chart-toggle">
+          <button id="rchart-daily" class="active" onclick="setReportChartMode('daily')" data-i18n="daily">Daily</button>
+          <button id="rchart-weekly" onclick="setReportChartMode('weekly')" data-i18n="weekly">Weekly</button>
+        </div>
+        <div class="report-chart-toggle">
+          <button id="rchart-both" class="active" onclick="setReportSeriesView('both')" data-i18n="eh_both">EH both</button>
+          <button id="rchart-recv" onclick="setReportSeriesView('recv')" data-i18n="eh_recv">EH receive</button>
+          <button id="rchart-ship" onclick="setReportSeriesView('ship')" data-i18n="eh_ship">EH ship</button>
+        </div>
+        <div class="report-chart-toggle" title="Capacity reference line source">
+          <button id="rcap-actual" class="active" onclick="setReportCapMode('actual')">Actual</button>
+          <button id="rcap-planned" onclick="setReportCapMode('planned')">Planned</button>
+        </div>
+        <button id="plan-open-btn" onclick="openPlannedModal()" class="report-chart-collapse-btn" title="Set up planned operators per day">⚙ Plan capacity…</button>
+        <button id="rchart-collapse-btn" onclick="toggleReportChart()" class="report-chart-collapse-btn">▾ Hide chart</button>
+      </div>
+      <div class="report-chart-canvas-box" id="report-chart-canvas-box"><canvas id="reportHoursChart"></canvas></div>
+    </div>
+
+    <div class="report-table-wrap">
+      <table class="report-table">
+        <thead><tr id="report-table-head"></tr><tr id="report-filter-row" class="report-filter-row"></tr></thead>
+        <tbody id="report-table-body"></tbody>
+      </table>
+    </div>
+
+    <div class="mbtns">
+      <button class="btn" onclick="closeReportModal()" data-i18n="close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="loadbar-overlay" id="loadbar-overlay">
+  <div class="loadbar-panel">
+    <div class="loadbar-title" id="loadbar-title">Refreshing…</div>
+    <div class="loadbar-bar" id="loadbar-bar"></div>
+    <div class="loadbar-status" id="loadbar-status"></div>
+  </div>
+</div>
+
+<div class="psb" id="pdo-status-banner">
+  <span class="psb-icon">🔒</span>
+  <div class="psb-body">
+    <div class="psb-title">Excel file is open</div>
+    <div class="psb-text">Details here</div>
+  </div>
+  <button class="psb-close" onclick="dismissPdoStatus()">✕</button>
+</div>
+
+<script>
+const AREA = '{{ area }}';
+
+// ── Theme system ─────────────────────────────────────────────────────────────
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme === 'dark' ? '' : theme);
+  localStorage.setItem('board_theme', theme);
+  const sel = document.getElementById('theme-select');
+  if (sel) sel.value = theme;
+  // Chart.js reads colors once at draw time — if the report chart is
+  // currently visible, redraw it so its colors follow the new theme too.
+  if (reportChart && document.getElementById('ov-report').classList.contains('show')) {
+    renderReportChart(getReportFiltered());
+  }
+}
+function initTheme() {
+  const saved = localStorage.getItem('board_theme') || 'dark';
+  setTheme(saved);
+}
+
+// ── Language / i18n system ──────────────────────────────────────────────────
+const I18N = {
+  en: {
+    title: 'Production Control Board',
+    workers: 'Workers',
+    pdo_queue: 'PDO Queue',
+    search_workers: '🔍 Search workers…',
+    search_pdo: '🔍 Search PDO, part…',
+    refresh_orders: '↻ Refresh orders',
+    refresh_fg_now: '↻ Refresh FG now',
+    manage_stations: '⚙ Stations',
+    manage_stations_title: 'Manage stations',
+    expand_all: '⤢ Expand all queues',
+    collapse_all: '⤡ Collapse all queues',
+    next_fg_sync: 'Next FG sync in',
+    in_progress: 'In-progress',
+    in_progress_etc: 'In-progress ETC',
+    queue_clear: 'Queue clear',
+    next: 'Next',
+    more_queued: 'more queued',
+    drop_pdo_here: 'Drop PDO here',
+    drop_worker_here: 'drop worker here',
+    all_assigned: 'All PDOs assigned',
+    no_workers_match: 'No workers match',
+    no_pdos_match: 'No PDOs match',
+    paused_no_worker: 'Paused — no worker',
+    off_hours: 'Frozen — outside production hours',
+    note_title: 'Note',
+    excel_note_label: 'Excel note (read-only)',
+    web_note_label: 'Web note',
+    mark_ng: 'Mark as NG (defective)',
+    confirm_replace_running: 'Replace the running order with this one? The current order will move to the front of the queue.',
+    note_merge_hint: 'Shown on the card as: Excel note (web note)',
+    not_received: 'Not received',
+    split_title: 'Split',
+    split_add_row: '+ Add split',
+    split_confirm: 'Split',
+    split_remaining_label: 'Remaining to allocate',
+    split_allocated: 'Allocated',
+    split_credit: 'credit',
+    split_current: 'current',
+    split_leave_in_pool: '— leave in pool —',
+    split_must_equal: 'must equal remaining exactly',
+    merge_title: 'Merge splits',
+    merge_target_label: 'Place merged order at',
+    merge_release_pool: '— Release to pool —',
+    merge_confirm: 'Merge',
+    attendance_gantt: '📊 Attendance',
+    attendance_gantt_title: "Today's Attendance",
+    att_lent_away: 'Lent to another area',
+    att_borrowed: 'Borrowed from another area',
+    att_lent_partial: 'Lent out',
+    report_view: '📋 Report',
+    report_view_title: 'PDO Report View',
+    finished_view: '✅ Finished',
+    finished_view_title: 'Finished PDOs',
+    search: 'Search',
+    recv_from: 'Receive from', recv_to: 'Receive to',
+    ship_from: 'Ship from', ship_to: 'Ship to',
+    part_search: 'Part / PO', vendor: 'Vendor',
+    received_label: 'Received', received_yes: 'Received only', received_no: 'Not received only',
+    assigned_label: 'Assigned', assigned_yes: 'Assigned only', assigned_no: 'Unassigned only',
+    clear_filters: '✕ Clear', hours_required_chart: 'Upcoming hours required',
+    daily: 'Daily', weekly: 'Weekly',
+    eh_both: 'EH both', eh_recv: 'EH receive', eh_ship: 'EH ship',
+    note_placeholder: 'Add a note…',
+    save: 'Save',
+    cancel: 'Cancel',
+    confirm: 'Confirm', confirm_title: 'Please confirm',
+    close: 'Close',
+    confirm: 'Confirm',
+    add: '+ Add',
+    remove: '✕ Remove',
+    in_use: '⚠ In use',
+    hc_full: 'General Shift',
+    overlap: 'Overlap',
+    high: 'High', mid: 'Mid', low: 'Low',
+    staffed: 'Staffed',
+    no_worker_assigned: 'No worker assigned',
+    already_here: 'Already here',
+    select_station: 'Select station',
+    enter_station_id: 'Enter a station ID',
+    network_error: 'Network error',
+    plan_title: 'Planned Capacity Setup',
+    plan_intro: 'Enter operators per day and mark OT. The Planned line = operators × net hours/op (none 6.73h · +2h 8.47h · +3h 9.08h). Saved automatically for this area.',
+    plan_from: 'From', plan_to: 'To', plan_refresh: '↻ Refresh',
+    plan_ops: 'Operators', plan_apply_to: 'Apply to',
+    plan_scope_all: 'All days', plan_scope_wd: 'Weekdays', plan_scope_we: 'Weekends',
+    plan_apply_fill: 'Apply fill', plan_clear_range: 'Clear range', plan_done: 'Done',
+    plan_copy_down: 'Copy ↓', plan_copy_hint: "Copy this day's operators + OT to every later day in the range",
+    plan_pick_range: 'Pick a valid From/To range.',
+    plan_days: 'days', plan_with_ops: 'with operators', plan_total: 'total planned',
+    plan_copied: 'Copied', plan_set_first: 'Set this day first, then copy',
+    col_date: 'Date', col_day: 'Day', col_hours: 'Hours', col_copy: 'Copy',
+    ot_none: 'none',
+    dow_0: 'Sun', dow_1: 'Mon', dow_2: 'Tue', dow_3: 'Wed', dow_4: 'Thu', dow_5: 'Fri', dow_6: 'Sat',
+  },
+  vi: {
+    title: 'Bảng Điều Khiển Sản Xuất',
+    workers: 'Công nhân',
+    pdo_queue: 'Hàng đợi PDO',
+    search_workers: '🔍 Tìm công nhân…',
+    search_pdo: '🔍 Tìm PDO, mã hàng…',
+    refresh_orders: '↻ Làm mới đơn hàng',
+    refresh_fg_now: '↻ Làm mới FG',
+    manage_stations: '⚙ Trạm',
+    manage_stations_title: 'Quản lý trạm',
+    expand_all: '⤢ Mở rộng tất cả',
+    collapse_all: '⤡ Thu gọn tất cả',
+    next_fg_sync: 'Đồng bộ FG tiếp theo sau',
+    in_progress: 'Đang chạy',
+    in_progress_etc: 'ETC đang chạy',
+    queue_clear: 'Thời gian hết hàng',
+    next: 'Tiếp theo',
+    more_queued: 'đang chờ',
+    drop_pdo_here: 'Thả PDO vào đây',
+    drop_worker_here: 'thả công nhân vào đây',
+    all_assigned: 'Đã phân bổ hết PDO',
+    no_workers_match: 'Không tìm thấy công nhân',
+    no_pdos_match: 'Không tìm thấy PDO',
+    paused_no_worker: 'Tạm dừng — chưa có công nhân',
+    off_hours: 'Đóng băng — ngoài giờ sản xuất',
+    note_title: 'Ghi chú',
+    excel_note_label: 'Ghi chú Excel (chỉ đọc)',
+    web_note_label: 'Ghi chú web',
+    mark_ng: 'Đánh dấu NG (lỗi)',
+    confirm_replace_running: 'Thay đơn đang chạy bằng đơn này? Đơn hiện tại sẽ chuyển lên đầu hàng chờ.',
+    note_merge_hint: 'Hiển thị trên thẻ: Ghi chú Excel (ghi chú web)',
+    not_received: 'Chưa nhận hàng',
+    split_title: 'Tách lệnh',
+    split_add_row: '+ Thêm tách',
+    split_confirm: 'Tách',
+    split_remaining_label: 'Còn lại để phân bổ',
+    split_allocated: 'Đã phân bổ',
+    split_credit: 'đã có',
+    split_current: 'hiện tại',
+    split_leave_in_pool: '— để trong hàng đợi —',
+    split_must_equal: 'phải bằng đúng số lượng còn lại',
+    merge_title: 'Gộp lệnh tách',
+    merge_target_label: 'Đặt lệnh đã gộp tại',
+    merge_release_pool: '— Trả về hàng đợi —',
+    merge_confirm: 'Gộp',
+    attendance_gantt: '📊 Chấm công',
+    attendance_gantt_title: 'Chấm công hôm nay',
+    att_lent_away: 'Cho mượn sang khu vực khác',
+    att_borrowed: 'Mượn từ khu vực khác',
+    att_lent_partial: 'Cho mượn một phần',
+    report_view: '📋 Báo cáo',
+    report_view_title: 'Báo cáo PDO',
+    finished_view: '✅ Đã xong',
+    finished_view_title: 'PDO đã hoàn thành',
+    search: 'Tìm kiếm',
+    recv_from: 'Nhận từ', recv_to: 'Nhận đến',
+    ship_from: 'Ship từ', ship_to: 'Ship đến',
+    part_search: 'Mã hàng / PO', vendor: 'Nhà cung cấp',
+    received_label: 'Đã nhận', received_yes: 'Chỉ đã nhận', received_no: 'Chỉ chưa nhận',
+    assigned_label: 'Đã phân bổ', assigned_yes: 'Chỉ đã phân bổ', assigned_no: 'Chỉ chưa phân bổ',
+    clear_filters: '✕ Xóa lọc', hours_required_chart: 'Giờ cần trong thời gian tới',
+    daily: 'Ngày', weekly: 'Tuần',
+    eh_both: 'EH cả hai', eh_recv: 'EH ngày nhận', eh_ship: 'EH ngày ship',
+    note_placeholder: 'Thêm ghi chú…',
+    save: 'Lưu',
+    cancel: 'Hủy',
+    confirm: 'Xác nhận', confirm_title: 'Vui lòng xác nhận',
+    close: 'Đóng',
+    confirm: 'Xác nhận',
+    add: '+ Thêm',
+    remove: '✕ Xóa',
+    in_use: '⚠ Đang dùng',
+    hc_full: 'Hành chính',
+    overlap: 'Giao ca',
+    high: 'Cao', mid: 'T.Bình', low: 'Thấp',
+    staffed: 'Có người',
+    no_worker_assigned: 'Chưa có công nhân',
+    already_here: 'Đã có ở đây',
+    select_station: 'Chọn trạm',
+    enter_station_id: 'Nhập mã trạm',
+    network_error: 'Lỗi mạng',
+    plan_title: 'Thiết lập năng lực kế hoạch',
+    plan_intro: 'Nhập số công nhân mỗi ngày và chọn tăng ca (OT). Đường Kế hoạch = số công nhân × giờ công/người (không OT 6.73h · +2h 8.47h · +3h 9.08h). Tự động lưu cho khu vực này.',
+    plan_from: 'Từ ngày', plan_to: 'Đến ngày', plan_refresh: '↻ Làm mới',
+    plan_ops: 'Số công nhân', plan_apply_to: 'Áp dụng cho',
+    plan_scope_all: 'Tất cả các ngày', plan_scope_wd: 'Ngày thường', plan_scope_we: 'Cuối tuần',
+    plan_apply_fill: 'Áp dụng', plan_clear_range: 'Xóa khoảng', plan_done: 'Xong',
+    plan_copy_down: 'Chép ↓', plan_copy_hint: 'Chép số công nhân + OT của ngày này sang mọi ngày sau trong khoảng',
+    plan_pick_range: 'Chọn khoảng ngày Từ/Đến hợp lệ.',
+    plan_days: 'ngày', plan_with_ops: 'ngày có công nhân', plan_total: 'tổng kế hoạch',
+    plan_copied: 'Đã chép', plan_set_first: 'Nhập ngày này trước, rồi chép',
+    col_date: 'Ngày', col_day: 'Thứ', col_hours: 'Giờ', col_copy: 'Chép',
+    ot_none: 'không',
+    dow_0: 'CN', dow_1: 'T2', dow_2: 'T3', dow_3: 'T4', dow_4: 'T5', dow_5: 'T6', dow_6: 'T7',
+  }
+};
+let currentLang = 'en';
+function t(key) {
+  return (I18N[currentLang] && I18N[currentLang][key]) || I18N.en[key] || key;
+}
+function setLang(lang) {
+  currentLang = lang;
+  localStorage.setItem('board_lang', lang);
+  const sel = document.getElementById('lang-select');
+  if (sel) sel.value = lang;
+  applyStaticTranslations();
+  if (BD) render();
+}
+function initLang() {
+  const saved = localStorage.getItem('board_lang') || 'en';
+  currentLang = saved;
+  const sel = document.getElementById('lang-select');
+  if (sel) sel.value = saved;
+  applyStaticTranslations();
+}
+function applyStaticTranslations() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => {
+    el.placeholder = t(el.dataset.i18nPh);
+  });
+  const expandBtn = document.getElementById('expand-all-btn');
+  if (expandBtn && !expandBtn.dataset.expanded) expandBtn.textContent = t('expand_all');
+}
+
+let BD = null;       // board data
+let NM = {};         // notes map
+let NGM = {};        // NG (defective) flag map: { pdo_id: true }
+let DS = null;       // drag state — set synchronously in dragstart
+let fetching = false;// lock to prevent concurrent fetches
+let notePDO  = null;
+let etcIv    = {};
+
+// ── Fetch ──────────────────────────────────────────────────────────────────────
+async function loadBoard() {
+  if (fetching) return;
+  fetching = true;
+  try {
+    const timeout = ms => new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms));
+    const br = await Promise.race([fetch(`/api/board/${AREA}`), timeout(8000)]);
+    if (!br.ok) throw new Error(`board HTTP ${br.status}`);
+    BD = await br.json();
+    try {
+      const nr = await fetch('/api/notes');
+      NM = await nr.json();
+    } catch(e) { console.warn('notes fetch failed', e); }
+    try {
+      const gr = await fetch('/api/ng');
+      NGM = await gr.json();
+    } catch(e) { console.warn('ng fetch failed', e); }
+    render();
+    updateBar();
+    checkPdoStatus(BD.pdo_status);
+    checkDevMode(BD.dev_mode);
+  } catch(e) {
+    console.error('loadBoard failed:', e.message);
+  } finally {
+    fetching = false;
+  }
+}
+
+// After user actions — bypass lock so UI updates immediately
+async function forceLoad() {
+  fetching = false;
+  await loadBoard();
+}
+
+async function refreshPDOs() {
+  const loader = showBlockyLoader('Refreshing orders', [
+    ['Connecting to plan file…', 0.15],
+    ['Reading production plan workbook…', 0.45],
+    ['Checking sheet & area…', 0.65],
+    ['Merging with live data…', 0.9],
+  ]);
+  try {
+    const r = await fetch('/api/refresh_pdos', {method:'POST'});
+    const d = await r.json();
+    checkPdoStatus(d.status, true);
+    // Await the board re-render BEFORE closing the loader, so the License
+    // Plate auto-assignments (which the POST above already ran) are on screen
+    // the instant the bar finishes — not a render tick later.
+    await forceLoad();
+    // The refresh just did a full FG pull, so restart the 60s FG countdown.
+    resetPollCountdown();
+    if (d.status === 'ok') {
+      loader.finish(`✓ Refreshed — ${d.count} PDOs`);
+      toast(`Refreshed — ${d.count} PDOs`, 'ok');
+    } else {
+      loader.finish('⚠ Refresh finished with issues', true);
+    }
+  } catch (e) {
+    loader.finish('✗ Refresh failed', true);
+    toast('⚠ Refresh failed', 'err');
+  }
+}
+
+// ── Persistent popup for Excel lock/error states (not an auto-fade toast) ──────
+let lastPdoStatus = 'ok';
+function checkDevMode(on) {
+  const b = document.getElementById('dev-banner');
+  if (b) b.style.display = on ? 'block' : 'none';
+  document.title = (on ? '🧪 DEV — ' : '') + '{{ area }} Control Board';
+}
+
+function checkPdoStatus(status, isManualRefresh) {
+  if (!status) return;
+  const banner = document.getElementById('pdo-status-banner');
+  if (status === 'ok') {
+    banner.classList.remove('show');
+    lastPdoStatus = 'ok';
+    return;
+  }
+  // Only pop up on manual refresh, or the first time we see this status
+  // (avoids re-popping every 10s poll while GL already knows and is dealing with it)
+  if (!isManualRefresh && status === lastPdoStatus) return;
+  lastPdoStatus = status;
+
+  const messages = {
+    locked:    { icon: '🔒', title: 'Excel file is open', text: 'Packaging_Plan_FollowUp_V01.xlsm is currently open in Excel. Close it, then click "Refresh orders" to pull the latest data.' },
+    corrupted: { icon: '⚠️', title: 'Excel file may be damaged', text: 'The plan file could not be read — it may be corrupted. Try opening it directly in Excel. If it offers to "repair", restore from OneDrive version history.' },
+    error:     { icon: '⚠️', title: 'Could not read Excel file', text: 'An unexpected error occurred while reading the plan file. The board is showing the last known data.' },
+    invalid_filename: { icon: '🚫', title: 'Wrong plan file for this board', text: 'The configured file name doesn\'t start with Packaging / AssyD / RawPart, so the board can\'t tell which area\'s orders to show. No PDOs will load until this is fixed — check the file path in the setup window.' },
+  };
+  const m = messages[status];
+  if (!m) return;
+  banner.querySelector('.psb-icon').textContent = m.icon;
+  banner.querySelector('.psb-title').textContent = m.title;
+  banner.querySelector('.psb-text').textContent = m.text;
+  banner.classList.add('show');
+}
+function dismissPdoStatus() {
+  document.getElementById('pdo-status-banner').classList.remove('show');
+}
+
+// ── Ticket / label printing ───────────────────────────────────────────────────
+let _issuePdo = null;
+function openIssueModal(pid) {
+  _issuePdo = pid;
+  document.getElementById('issue-pdo').textContent = 'PDO: ' + pid;
+  document.getElementById('issue-stations').innerHTML =
+    (BD && BD.stations || []).map(s => `<option value="${esc(s)}">`).join('');
+  document.getElementById('issue-msg').textContent = '';
+  document.getElementById('issue-go').disabled = false;
+  document.getElementById('issue-bpt').checked = true;
+  document.getElementById('issue-box').checked = true;
+  document.getElementById('ov-issue').classList.add('show');
+  setTimeout(() => document.getElementById('issue-station').focus(), 50);
+}
+function closeIssueModal() { document.getElementById('ov-issue').classList.remove('show'); }
+async function submitIssue() {
+  const station = document.getElementById('issue-station').value.trim();
+  const msg = document.getElementById('issue-msg');
+  if (!station) { msg.textContent = 'Enter a station.'; return; }
+  const go = document.getElementById('issue-go');
+  go.disabled = true; msg.textContent = 'Issuing…';
+  const body = {
+    pdo_id: _issuePdo, station,
+    pro_h: document.getElementById('issue-proh').value,
+    pro_m: document.getElementById('issue-prom').value,
+    do_bpt: document.getElementById('issue-bpt').checked,
+    do_boxlabel: document.getElementById('issue-box').checked,
+  };
+  try {
+    const r = await fetch('/api/issue_ticket', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const d = await r.json();
+    if (!r.ok) { msg.textContent = '⚠ ' + (d.error || 'failed'); go.disabled = false; return; }
+    if (d.bpt_token) window.open('/bpt/' + d.bpt_token, '_blank');   // BPT auto-prints in the new tab
+    const w = d.warnings || [];
+    toast(`Issued · ${(d.lps||[]).length} label(s) · queued on ${station} (${d.placed})` + (w.length ? ` · ${w.length} warning(s)` : ''), w.length ? 'warn' : 'ok');
+    if (w.length) console.warn('issue warnings:', w);
+    closeIssueModal();
+    forceLoad();
+  } catch (e) { msg.textContent = 'Network error'; go.disabled = false; }
+}
+
+async function openPrintSettings() {
+  document.getElementById('ov-psettings').classList.add('show');
+  const msg = document.getElementById('ps-msg'); msg.textContent = '';
+  let win = false;
+  try {
+    const pr = await (await fetch('/api/printers')).json();
+    document.getElementById('ps-printers').innerHTML = (pr.printers || []).map(p => `<option value="${esc(p)}">`).join('');
+    win = pr.win;
+  } catch (e) {}
+  try {
+    const s = await (await fetch('/api/print_settings')).json();
+    document.getElementById('ps-zebra').value = s.zebra_printer || '';
+    document.getElementById('ps-canon').value = s.canon_printer || '';
+    document.getElementById('ps-maindb').value = s.maindb_path || '';
+    document.getElementById('ps-email').value = (s.email_recipients || []).join('\n');
+  } catch (e) {}
+  if (!win) msg.textContent = 'Note: no Windows printers detected on this host (pywin32). Names still save; actual printing runs on the board PC.';
+}
+function closePrintSettings() { document.getElementById('ov-psettings').classList.remove('show'); }
+async function savePrintSettings() {
+  const msg = document.getElementById('ps-msg');
+  const body = {
+    zebra_printer: document.getElementById('ps-zebra').value.trim(),
+    canon_printer: document.getElementById('ps-canon').value.trim(),
+    maindb_path: document.getElementById('ps-maindb').value.trim(),
+    email_recipients: document.getElementById('ps-email').value,
+  };
+  try {
+    const r = await fetch('/api/print_settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    if (r.ok) { msg.textContent = 'Saved ✓'; toast('Print settings saved', 'ok'); }
+    else msg.textContent = 'Save failed';
+  } catch (e) { msg.textContent = 'Network error'; }
+}
+
+// ── Priority ───────────────────────────────────────────────────────────────────
+function pc(p) {
+  if (p.priority_override) return p.priority_override;  // GL manual override wins
+  if (p.days_left<=1) return 'ph';                       // HIGH/red = due within 1 day
+  if (p.days_left<=6||p.urgency<35) return 'pm';
+  return 'pl';
+}
+function pl(c) { return c==='ph'?t('high'):c==='pm'?t('mid'):t('low'); }
+
+// ── HTML escaping ──────────────────────────────────────────────────────────────
+// Every value that comes from Excel, SQL or a user-typed note gets funnelled
+// through esc() before it goes into innerHTML or an attribute. Without it a
+// part description or vendor name containing a plain " or < silently breaks the
+// card markup (and would be an injection vector) — e.g. title="${desc}" is torn
+// apart by a single double-quote in the description.
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Abbreviate a worker's name for the compact station tag:
+// "Nguyen Van Manh" → "N.V.Manh" (all but the last word become initials).
+function abbrevName(full) {
+  const parts = String(full || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return full || '';
+  return parts.slice(0, -1).map(p => p[0].toUpperCase() + '.').join('') + parts[parts.length - 1];
+}
+
+// ── Card HTML ──────────────────────────────────────────────────────────────────
+function formatNote(excelNote, webNote) {
+  const en = (excelNote||'').trim();
+  const wn = (webNote||'').trim();
+  if (en && wn) return `${en} (${wn})`;
+  if (en) return en;
+  if (wn) return wn;
+  return '';
+}
+
+function cardHTML(pdo, assigned, station, bin, idx) {
+  const p = pc(pdo);
+  const note = formatNote(pdo.note, NM[pdo.id]);
+  const prog = assigned&&bin==='inprogress'&&pdo.qty>0
+    ? Math.round((pdo.qty-pdo.remaining_qty)/pdo.qty*100) : -1;
+  const idxAttr = (idx!==undefined && idx!==null) ? ` data-idx="${idx}"` : '';
+  // Received tag: 🛒 + qty when material is in. If NOT received but ship date
+  // is coming up soon, show a red warning instead — a heads-up that this order
+  // is on the board (within the 14-day window) but material hasn't arrived yet.
+  const receivedTag = pdo.received > 0
+    ? `<span class="crecv ok">🛒 ${pdo.received}</span>`
+    : `<span class="crecv warn" title="${t('not_received')}">🛒⚠</span>`;
+  const sampleTag = pdo.is_sample ? `<span class="csample">SAMPLE</span>` : '';
+  // NG (defective) octagon — set from the note modal's checkbox.
+  const ngTag = NGM[pdo.id] ? `<span class="cng" title="NG — defective">NG</span>` : '';
+  // Split badge — shown on a split child (A/B/C/D), click to merge that
+  // family back together. Split button — shown on any non-split card,
+  // opens the split modal.
+  const splitBadge = pdo.is_split_child
+    ? `<span class="csplitbadge" data-parent="${esc(pdo.parent_id)}" title="Split ${esc(pdo.split_letter)} @ ${esc(pdo.split_station)} — click to merge back">🔀 ${esc(pdo.split_letter)}</span>`
+    : '';
+  const splitBtn = (!pdo.is_split_child)
+    ? `<button class="csplit" data-pid="${esc(pdo.id)}" title="Split across stations">✂</button>` : '';
+  const printBtn = `<button class="cprint" data-pid="${esc(pdo.id)}" title="Print ticket / label + queue on station">🖨</button>`;
+  return `<div class="card ${p}" draggable="true"
+    data-id="${esc(pdo.id)}" data-loc="${assigned?esc(station):'queue'}" data-bin="${assigned?esc(bin):'queue'}"${idxAttr}>
+    ${assigned?`<button class="crm" data-s="${esc(station)}" data-b="${esc(bin)}" data-id="${esc(pdo.id)}">✕</button>`:''}
+    <button class="cnte" data-pid="${esc(pdo.id)}">✎</button>
+    ${splitBtn}${printBtn}
+    <div class="ctop"><span class="cid">${esc(pdo.id)}</span><span class="ctop-tags">${ngTag}${sampleTag}${receivedTag}<span class="cprio cprio-click ${p}" data-pid="${esc(pdo.id)}" title="Click to change priority">${pl(p)}${pdo.priority_override?' •':''}</span></span></div>
+    ${splitBadge}
+    <div class="cpart">${esc(pdo.part)}</div>
+    <div class="cdesc" title="${esc(pdo.desc||'')}">${esc(pdo.desc||'')}</div>
+    <div class="cmeta"><span>${esc(pdo.dest)}</span><span>${pdo.completed_qty} / ${pdo.qty} pcs</span></div>
+    <div class="cship">📅 ${esc(pdo.ship_date)} &nbsp;·&nbsp; ⏱ ${pdo.std_hours}h</div>
+    ${note?`<div class="cnote">💬 ${esc(note)}</div>`:''}
+    ${prog>=0?`<div class="cprog"><div class="cprog-bar" style="width:${prog}%"></div></div>`:''}
+  </div>`;
+}
+
+// ── Wire card events (call after injecting HTML) ───────────────────────────────
+function wireCards(root) {
+  root.querySelectorAll('.card').forEach(c => {
+    c.addEventListener('dragstart', onCardDragStart);
+    c.addEventListener('dragend',   onCardDragEnd);
+    c.addEventListener('dblclick',  onCardDblClick);
+  });
+  root.querySelectorAll('.crm').forEach(b => {
+    b.addEventListener('click', e => { e.stopPropagation(); removePDO(b.dataset.s, b.dataset.b, b.dataset.id); });
+  });
+  root.querySelectorAll('.cnte').forEach(b => {
+    b.addEventListener('click', e => { e.stopPropagation(); openNote(b.dataset.pid); });
+  });
+  root.querySelectorAll('.csplit').forEach(b => {
+    b.addEventListener('click', e => { e.stopPropagation(); openSplitModal(b.dataset.pid); });
+  });
+  root.querySelectorAll('.cprint').forEach(b => {
+    b.addEventListener('click', e => { e.stopPropagation(); openIssueModal(b.dataset.pid); });
+  });
+  root.querySelectorAll('.csplitbadge').forEach(b => {
+    b.addEventListener('click', e => { e.stopPropagation(); confirmMerge(b.dataset.parent); });
+  });
+  root.querySelectorAll('.cprio-click').forEach(b => {
+    b.addEventListener('click', e => { e.stopPropagation(); openPriorityMenu(b, b.dataset.pid); });
+  });
+}
+
+// ── Manual priority override ──────────────────────────────────────────────────
+let _prioMenuEl = null;
+function closePriorityMenu() {
+  if (_prioMenuEl) { _prioMenuEl.remove(); _prioMenuEl = null; document.removeEventListener('mousedown', _prioMenuOutside); }
+}
+function _prioMenuOutside(e) { if (_prioMenuEl && !_prioMenuEl.contains(e.target)) closePriorityMenu(); }
+function openPriorityMenu(anchorEl, pid) {
+  closePriorityMenu();
+  const menu = document.createElement('div');
+  menu.className = 'prio-menu';
+  const opts = [['ph', t('high')], ['pm', t('mid')], ['pl', t('low')], ['', 'Auto']];
+  menu.innerHTML = opts.map(([v, l]) => `<button data-v="${v}">${l}</button>`).join('');
+  document.body.appendChild(menu);
+  const r = anchorEl.getBoundingClientRect();
+  menu.style.left = Math.min(r.left, window.innerWidth - 150) + 'px';
+  menu.style.top = (r.bottom + 4) + 'px';
+  menu.querySelectorAll('button').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation();
+    const v = b.dataset.v;
+    closePriorityMenu();
+    setPriority(pid, v || null);
+  }));
+  _prioMenuEl = menu;
+  setTimeout(() => document.addEventListener('mousedown', _prioMenuOutside), 0);
+}
+async function setPriority(pdoId, priority) {
+  try {
+    const r = await fetch('/api/priority', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({pdo_id: pdoId, priority})});
+    const d = await r.json();
+    if (!r.ok) { toast('⚠ ' + (d.error||'failed'), 'err'); return; }
+    toast(priority ? 'Priority set' : 'Priority reset to auto', 'ok');
+    forceLoad();
+  } catch (e) { toast(t('network_error'), 'err'); }
+}
+
+// ── Copy card info (double-click) ───────────────────────────────────────────────
+function findPdoById(id) {
+  if (BD.queue) { const q = BD.queue.find(p => p.id === id); if (q) return q; }
+  for (const sid of (BD.stations||[])) {
+    const st = BD.board[sid];
+    if (!st) continue;
+    if (st.inprogress && st.inprogress.id === id) return st.inprogress;
+    const q = (st.queue||[]).find(p => p.id === id);
+    if (q) return q;
+  }
+  return null;
+}
+// ── Selectable mode (double-click) — lets the user drag-select text on a card
+// to copy manually, since draggable=true normally hijacks click+drag for
+// moving the card instead of selecting text.
+function onCardDblClick(e) {
+  e.stopPropagation();
+  const card = e.currentTarget;
+  const wasSelectable = card.classList.contains('selectable');
+  // Only one card selectable at a time — reset any others first
+  document.querySelectorAll('.card.selectable').forEach(c => {
+    c.classList.remove('selectable');
+    c.draggable = true;
+  });
+  if (!wasSelectable) {
+    card.classList.add('selectable');
+    card.draggable = false;
+  }
+}
+// Clicking anywhere outside a card exits selectable mode
+document.addEventListener('mousedown', e => {
+  if (e.target.closest('.card')) return;
+  document.querySelectorAll('.card.selectable').forEach(c => {
+    c.classList.remove('selectable');
+    c.draggable = true;
+  });
+});
+
+// ── Render ─────────────────────────────────────────────────────────────────────
+function render() {
+  updateAreaTitle();
+  renderWorkers();
+  renderQueue();
+  renderStations();
+  renderAtRiskBanner();
+  rebuildSim();
+  renderShiftArc();
+}
+
+// ── Same-day at-risk alert ────────────────────────────────────────────────────
+// An order is "at-risk" when it is due TODAY (days_left===0), still unfinished
+// (remaining_qty>0), and it is past 14:00 local — i.e. unlikely to ship today.
+function nowPast2PM(){ const n=new Date(); return (n.getHours()+n.getMinutes()/60) >= 14; }
+function isAtRiskPdo(p){
+  return !!p && Number(p.days_left)===0 && Number(p.remaining_qty)>0 && nowPast2PM();
+}
+function stationAtRisk(st){
+  if(!st) return false;
+  if(isAtRiskPdo(st.inprogress)) return true;
+  return (st.queue||[]).some(isAtRiskPdo);
+}
+function renderAtRiskBanner(){
+  const el=document.getElementById('risk-banner');
+  if(!el||!BD) return;
+  const list=[];
+  (BD.stations||[]).forEach(sid=>{
+    const st=BD.board[sid]||{};
+    if(isAtRiskPdo(st.inprogress)) list.push({p:st.inprogress, where:sid});
+    (st.queue||[]).forEach(p=>{ if(isAtRiskPdo(p)) list.push({p, where:sid+' · queue'}); });
+  });
+  (BD.queue||[]).forEach(p=>{ if(isAtRiskPdo(p)) list.push({p, where:t('unassigned')||'unassigned'}); });
+  if(!list.length){ el.style.display='none'; el.innerHTML=''; return; }
+  const items=list.map(r=>
+    `<span class="risk-item">${esc(r.p.id)}${r.p.part?' · '+esc(r.p.part):''}<span class="rw">${esc(r.where)}</span></span>`
+  ).join('');
+  el.innerHTML=`<span class="risk-ic">⚠</span><span>DUE TODAY — unfinished past 14:00 (${list.length}):</span>${items}`;
+  el.style.display='flex';
+}
+
+function updateAreaTitle() {
+  const label = BD.area_label || 'PRODUCTION';
+  const el = document.getElementById('area-title');
+  if (el) el.textContent = label;
+  document.title = `${label} — Control Board`;
+}
+
+// ── Flat shift timeline — merged into header ────────────────────────────────
+// Segments show Ca1 / overlap / Ca2 (or a single HC band on general-shift days),
+// widths proportional to duration, computed server-side from TODAY's real
+// attendance (who's actually on OT) rather than the fixed schedule. A vertical
+// marker with a time label tracks "now" across the bar.
+function fmtHour(dec) {
+  const h = Math.floor(dec), m = Math.round((dec - h) * 60);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+function renderShiftArc() {
+  const el = document.getElementById('shift-timeline');
+  if (!el || !BD.shift_windows) return;
+  const sw = BD.shift_windows;
+  const dayStart = 6.0, dayEnd = 22.333;
+  const span = dayEnd - dayStart;
+  const pct = t => Math.max(0, Math.min(100, ((t - dayStart) / span) * 100));
+
+  let track = '';
+
+  if (sw.mode === 'hc') {
+    const w = pct(sw.hc_end) - pct(sw.hc_start);
+    track += `<div class="tl-seg hc" style="left:${pct(sw.hc_start)}%;width:${w}%;position:absolute;top:0;bottom:0">
+      <span class="tl-name">Hành chính</span><span class="tl-time">${fmtHour(sw.hc_start)}–${fmtHour(sw.hc_end)}</span>
+    </div>`;
+  } else {
+    const { ca1_start, ca1_end, ca2_start, ca2_end } = sw;
+    const ovStart = Math.max(ca1_start, ca2_start);
+    const ovEnd   = Math.min(ca1_end, ca2_end);
+    const hasOverlap = (ovEnd - ovStart) > 0.05;
+
+    const ca1W = pct(ca1_end) - pct(ca1_start);
+    track += `<div class="tl-seg ca1" style="position:absolute;left:${pct(ca1_start)}%;width:${ca1W}%;top:0;bottom:0;z-index:1">
+      <span class="tl-name">Ca 1</span><span class="tl-time">${fmtHour(ca1_start)}–${fmtHour(ca1_end)}</span>
+    </div>`;
+    const ca2W = pct(ca2_end) - pct(ca2_start);
+    track += `<div class="tl-seg ca2" style="position:absolute;left:${pct(ca2_start)}%;width:${ca2W}%;top:0;bottom:0;z-index:1">
+      <span class="tl-name">Ca 2</span><span class="tl-time">${fmtHour(ca2_start)}–${fmtHour(ca2_end)}</span>
+    </div>`;
+    if (hasOverlap) {
+      const ovW = pct(ovEnd) - pct(ovStart);
+      track += `<div class="tl-seg overlap" style="position:absolute;left:${pct(ovStart)}%;width:${ovW}%;top:0;bottom:0;z-index:2">
+        <span class="tl-name">Overlap</span><span class="tl-time">${fmtHour(ovStart)}–${fmtHour(ovEnd)}</span>
+      </div>`;
+    }
+  }
+
+  // Edge time labels + now-marker live OUTSIDE the clipped track so the
+  // marker's arrows/label (which extend above/below the bar) aren't cut off
+  let outer = `<div class="tl-track">${track}</div>`;
+  outer += `<span class="tl-edge left">${fmtHour(dayStart)}</span>`;
+  outer += `<span class="tl-edge right">${fmtHour(dayEnd)}</span>`;
+
+  const now = new Date();
+  const nowDec = Math.min(dayEnd, Math.max(dayStart, now.getHours() + now.getMinutes() / 60));
+  const nowPct = pct(nowDec);
+  const nowStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  outer += `<div class="tl-now" style="left:${nowPct}%"></div>`;
+
+  el.innerHTML = outer;
+}
+
+let expandedStations = new Set();  // stations with queue expanded (any mode)
+let expandedViaAll    = new Set();  // subset expanded via "Expand All" -> render full cards; individual clicks always render compact
+
+function toggleExpandAll() {
+  // Stations that actually have something to expand (2+ items queued, since
+  // the first queue item is already shown as "Next")
+  const expandable = (BD.stations||[]).filter(sid => {
+    const q = (BD.board[sid]||{}).queue || [];
+    return q.length > 1;
+  });
+  const allExpanded = expandable.length > 0 && expandable.every(sid => expandedStations.has(sid) && expandedViaAll.has(sid));
+  if (allExpanded) {
+    expandable.forEach(sid => { expandedStations.delete(sid); expandedViaAll.delete(sid); });
+  } else {
+    // Expand All always shows the FULL CARD view, regardless of any station
+    // that might currently be individually expanded in compact mode.
+    expandable.forEach(sid => { expandedStations.add(sid); expandedViaAll.add(sid); });
+  }
+  renderStations();
+  const btn = document.getElementById('expand-all-btn');
+  if (btn) btn.textContent = allExpanded ? t('expand_all') : t('collapse_all');
+}
+
+function renderWorkers() {
+  const assigned = new Set();
+  if (BD.board) Object.values(BD.board).forEach(st=>(st.workers||[]).forEach(id=>assigned.add(String(id))));
+  const el = document.getElementById('worker-pool');
+  const term = (document.getElementById('w-search')?.value||'').trim().toLowerCase();
+  let list = [...(BD.workers||[])];
+  if (term) {
+    list = list.filter(w => w.name.toLowerCase().includes(term) || String(w.id).toLowerCase().includes(term));
+  }
+  const sorted = list.sort((a,b)=>{
+    return (assigned.has(String(a.id))?1:0)-(assigned.has(String(b.id))?1:0);
+  });
+  if (sorted.length===0) {
+    el.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text3);font-size:11px">${t('no_workers_match')} "${esc(term)}"</div>`;
+  } else {
+    el.innerHTML = sorted.map(w => {
+      const a = assigned.has(String(w.id));
+      const upcoming = (w.active === false);  // next-shift worker, pre-assignable but not yet counted in ETC
+      const shiftClass = w.shift==='Ca 1'?'s-ca1':w.shift==='Ca 2'?'s-ca2':'s-hc';
+      const shiftLabel  = w.shift==='Ca 1'?'Ca 1':w.shift==='Ca 2'?'Ca 2':'HC';
+      return `<div class="wchip${a?' dim':''}${upcoming?' upcoming':''}" draggable="true" data-wid="${esc(w.id)}" data-wname="${esc(w.name)}" title="${upcoming?'Next shift — assignable now, counts toward ETC once the shift starts':''}">
+        <div class="wn">${esc(w.name)}${a?' ✓':''}</div>
+        <div class="wi">${esc(w.id)}</div>
+        <span class="wshift ${shiftClass}">${shiftLabel}</span>
+        ${upcoming?'<span class="wsoon">SOON</span>':''}
+      </div>`;
+    }).join('');
+  }
+  el.querySelectorAll('.wchip').forEach(c=>{
+    c.addEventListener('dragstart', onWorkerDragStart);
+    c.addEventListener('dragend',   onWorkerDragEnd);
+  });
+  document.getElementById('w-count').textContent = (BD.workers||[]).length;
+}
+
+function renderQueue() {
+  const el = document.getElementById('pdo-queue');
+  const term = (document.getElementById('q-search')?.value||'').trim().toLowerCase();
+  let q = BD.queue||[];
+  if (term) {
+    q = q.filter(p =>
+      p.id.toLowerCase().includes(term) ||
+      (p.part||'').toLowerCase().includes(term) ||
+      (p.desc||'').toLowerCase().includes(term) ||
+      (p.dest||'').toLowerCase().includes(term)
+    );
+  }
+  el.innerHTML = q.length===0
+    ? `<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px">${term ? `${t('no_pdos_match')} "${esc(term)}"` : t('all_assigned')}</div>`
+    : q.map(p=>cardHTML(p,false,null,null)).join('');
+  wireCards(el);
+  document.getElementById('q-count').textContent = (BD.queue||[]).length;
+}
+
+function qRowHTML(pdo, sid, idx) {
+  return `<div class="qrow" draggable="true" data-id="${esc(pdo.id)}" data-sid="${esc(sid)}" data-idx="${idx}">
+    <span class="qrow-handle">≡</span>
+    <span class="qrow-id">${esc(pdo.id)}</span>
+    <span class="qrow-qty">${pdo.completed_qty}/${pdo.qty} pcs</span>
+    <button class="qrow-rm" data-sid="${esc(sid)}" data-id="${esc(pdo.id)}">✕</button>
+  </div>`;
+}
+
+function stationColHTML(sid, st) {
+  const hasIP    = !!st.inprogress;
+  const workers  = st.workers||[];
+  const online    = workers.length > 0;   // green only when a worker is staffed — matches physical reality
+  const timer    = st.timer||{};
+  const queue    = st.queue||[];
+  const nextPdo  = queue[0]||null;
+  const restQ    = queue.slice(1);
+  const expanded = expandedStations.has(sid);
+  const fullCards = expandedViaAll.has(sid);
+
+  const wtags = workers.map(wid=>{
+    const w=(BD.workers||[]).find(x=>String(x.id)===String(wid));
+    const name=w?abbrevName(w.name):wid;
+    const shiftClass = w ? (w.shift==='Ca 1'?'t-ca1':w.shift==='Ca 2'?'t-ca2':'t-hc') : '';
+    const soon = (w && w.active === false) ? ' soon' : '';  // pre-assigned next-shift worker
+    return `<span class="wtag ${shiftClass}${soon}" draggable="true" data-sid="${esc(sid)}" data-wid="${esc(wid)}" data-wname="${esc(w?w.name:wid)}" title="${soon?'Next shift — not counted in ETC until shift starts':'Drag to another station to move'}">${esc(name)}<span class="x" data-sid="${esc(sid)}" data-wid="${esc(wid)}">×</span></span>`;
+  }).join('');
+
+  const moreHTML = restQ.length > 0 ? `
+    <div class="qmore${expanded?' expanded':''}" data-sid="${sid}">
+      <span>+${restQ.length} ${t('more_queued')}</span>
+      <span class="arrow">▼</span>
+    </div>
+    ${expanded ? `<div class="qexpand${fullCards?' full-mode':''}" id="qexp-${sid}">
+      ${fullCards
+        ? restQ.map((p,i)=>cardHTML(p,true,sid,'queue',i+1)).join('')
+        : restQ.map((p,i)=>qRowHTML(p,sid,i+1)).join('')
+      }
+    </div>` : ''}
+  ` : '';
+
+  return `
+    <div class="shead">
+      <span class="sid">${esc(sid)}</span>
+      <span class="sdot ${online?'on':'off'}" title="${online?t('staffed'):t('no_worker_assigned')}"></span>
+    </div>
+    <div class="sworkers${workers.length===0?' empty':''}" id="sw-${sid}" data-hint="${t('drop_worker_here')}">${wtags}</div>
+    <div class="etc-block">
+      <div class="etc"><span class="etc-lbl">${t('in_progress_etc')}</span><span class="etc-val" id="etc-${sid}">—</span></div>
+      <div class="etc"><span class="etc-lbl">${t('queue_clear')}</span><span class="etc-val qc" id="qc-${sid}">—</span></div>
+    </div>
+    <div class="bin" id="bip-${sid}" data-sid="${sid}" data-btype="inprogress">
+      <div class="blbl"><span class="dot-g"></span>${t('in_progress')}</div>
+      ${hasIP?cardHTML(st.inprogress,true,sid,'inprogress'):`<div class="bempty">${t('drop_pdo_here')}</div>`}
+    </div>
+    <div class="bin" id="bqueue-${sid}" data-sid="${sid}" data-btype="queue">
+      <div class="blbl"><span class="dot-b"></span>${t('next')}</div>
+      ${nextPdo?qRowNextHTML(nextPdo,sid):`<div class="bempty">${t('drop_pdo_here')}</div>`}
+    </div>
+    ${moreHTML}`;
+}
+
+// "Next" preview uses the full card style (bigger, more readable) — expanded list
+// uses compact rows. idx 0 so it's a real reorder target (drop here → position 0).
+function qRowNextHTML(pdo, sid) {
+  return cardHTML(pdo, true, sid, 'queue', 0);
+}
+
+function renderStations() {
+  Object.values(etcIv).forEach(id=>clearInterval(id));
+  etcIv = {};
+  const row = document.getElementById('srow');
+  row.innerHTML = '';
+  (BD.stations||[]).forEach(sid=>{
+    const st = BD.board[sid]||{};
+    const col = document.createElement('div');
+    col.className = `scol${(st.workers&&st.workers.length>0)?' active':''}${stationAtRisk(st)?' at-risk':''}`;
+    col.id = `station-${sid}`;
+    col.innerHTML = stationColHTML(sid, st);
+    row.appendChild(col);
+    wireStationEvents(col, sid, st);
+  });
+}
+
+// Re-render just one station's column (used after queue moves — avoids full-board flicker)
+function renderOneStation(sid) {
+  const col = document.getElementById(`station-${sid}`);
+  if (!col) return;
+  const st = BD.board[sid]||{};
+  if (etcIv[sid]) { clearInterval(etcIv[sid]); delete etcIv[sid]; }
+  if (etcIv[sid+'_qc']) { clearInterval(etcIv[sid+'_qc']); delete etcIv[sid+'_qc']; }
+  col.className = `scol${(st.workers&&st.workers.length>0)?' active':''}${stationAtRisk(st)?' at-risk':''}`;
+  col.innerHTML = stationColHTML(sid, st);
+  wireStationEvents(col, sid, st);
+}
+
+function wireStationEvents(col, sid, st) {
+  wireCards(col);
+  wireQRows(col);
+
+  // Bin drag listeners (inprogress + queue container)
+  col.querySelectorAll('.bin').forEach(bin=>{
+    bin.addEventListener('dragover', onBinOver);
+    bin.addEventListener('dragleave', onBinLeave);
+    bin.addEventListener('drop', onBinDrop);
+  });
+
+  // Worker drop zone
+  const sw = col.querySelector(`#sw-${sid}`);
+  if (sw) {
+    sw.addEventListener('dragover',  onWorkerOver);
+    sw.addEventListener('dragleave', onWorkerLeave);
+    sw.addEventListener('drop',      e=>onWorkerDrop(e,sid));
+  }
+  col.querySelectorAll('.wtag .x').forEach(x=>{
+    x.addEventListener('click', e=>{e.stopPropagation(); removeWorker(x.dataset.sid,x.dataset.wid);});
+  });
+  // Station worker tags are draggable → drag straight to another station to move.
+  col.querySelectorAll('.wtag').forEach(tag=>{
+    tag.addEventListener('dragstart', onWorkerDragStart);
+    tag.addEventListener('dragend',   onWorkerDragEnd);
+  });
+
+  // Expand/collapse toggle
+  const moreBtn = col.querySelector('.qmore');
+  if (moreBtn) {
+    moreBtn.addEventListener('click', () => {
+      if (expandedStations.has(sid)) {
+        expandedStations.delete(sid);
+        expandedViaAll.delete(sid);
+      } else {
+        expandedStations.add(sid);
+        expandedViaAll.delete(sid);  // individual click always → compact view
+      }
+      renderOneStation(sid);
+    });
+  }
+
+  // Expanded list empty-space also accepts drops (append to end)
+  const qexp = col.querySelector(`#qexp-${sid}`);
+  if (qexp) {
+    qexp.addEventListener('dragover', e => {
+      if(!DS||DS.type!=='pdo') return;
+      e.preventDefault(); e.stopPropagation();
+    });
+    qexp.addEventListener('drop', async e => {
+      if (e.target !== qexp) return; // rows handle their own drop for reorder
+      e.preventDefault(); e.stopPropagation();
+      if(!DS||DS.type!=='pdo') return;
+      const {id,fromLoc,fromBin} = DS;
+      DS=null;
+      await appendToQueue(sid, fromLoc, fromBin, id);
+    });
+  }
+
+  const timer = st.timer||{};
+  if (timer.paused) {
+    // Frozen: outside production hours OR no active worker. Hold the remaining
+    // estimate (doesn't tick) with a reason label instead of a live countdown.
+    const etcEl = document.getElementById(`etc-${sid}`);
+    const qcEl  = document.getElementById(`qc-${sid}`);
+    const reason = timer.off_hours ? t('off_hours') : t('paused_no_worker');
+    const est = (timer.remaining_min!=null) ? `~${fmtMinutes(timer.remaining_min)} · ` : '';
+    if (etcEl) { etcEl.textContent = est + reason; etcEl.className = 'etc-val'; }
+    if (qcEl)  { qcEl.textContent  = reason; qcEl.className  = 'etc-val'; }
+  } else {
+    if (st.inprogress && timer.etc) startETC(`etc-${sid}`, timer.etc, sid);
+    if (timer.queue_clear) startETC(`qc-${sid}`, timer.queue_clear, sid+'_qc', true);
+  }
+}
+function fmtMinutes(min){
+  min = Math.max(0, Math.round(min));
+  const h = Math.floor(min/60), m = min%60;
+  return h>0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function wireQRows(root) {
+  // Compact rows (individual station expand) — need their own dragstart/dragend
+  // since they don't go through wireCards().
+  root.querySelectorAll('.qexpand .qrow').forEach(row=>{
+    row.addEventListener('dragstart', onQRowDragStart);
+    row.addEventListener('dragend',   onQRowDragEnd);
+    row.addEventListener('dragover',  onQRowOver);
+    row.addEventListener('dragleave', onQRowLeave);
+    row.addEventListener('drop',      onQRowDrop);
+  });
+  root.querySelectorAll('.qrow-rm').forEach(b=>{
+    b.addEventListener('click', e=>{
+      e.stopPropagation();
+      removeQueueItem(b.dataset.sid, b.dataset.id);
+    });
+  });
+  // Full cards (Expand All mode) — dragstart/dragend already handled by
+  // wireCards(); this just adds the reorder-by-position behavior on top.
+  root.querySelectorAll('.qexpand .card').forEach(card=>{
+    card.addEventListener('dragover',  onQRowOver);
+    card.addEventListener('dragleave', onQRowLeave);
+    card.addEventListener('drop',      onQRowDrop);
+  });
+  // The "Next" (queue position 0) card is its own drop target too, so an order
+  // can be dragged UP to become the next one — previously nothing could land at
+  // position 0 (the Next slot's bin just appended to the end).
+  root.querySelectorAll('.bin[data-btype="queue"] > .card').forEach(card=>{
+    card.addEventListener('dragover',  onQRowOver);
+    card.addEventListener('dragleave', onQRowLeave);
+    card.addEventListener('drop',      onQRowDrop);
+  });
+}
+
+function updateBar() {
+  if (!BD) return;
+  const now=new Date(), h=now.getHours(), m=String(now.getMinutes()).padStart(2,'0');
+  document.getElementById('c-time').textContent=`${h}:${m}`;
+  document.getElementById('c-shift').textContent=h>=6&&h<14?'Ca1':h>=14&&h<22?'Ca2':'HC';
+  const q=(BD.queue||[]).length;
+  const ci=document.getElementById('c-queue');
+  ci.textContent=`${q} queue`; ci.className=q>0?'chip a':'chip g';
+  let idle=0; Object.values(BD.board||{}).forEach(s=>{if(!s.inprogress)idle++;});
+  const ii=document.getElementById('c-idle');
+  ii.textContent=`${idle} idle`; ii.className=idle>0?'chip r':'chip g';
+}
+
+function startETC(elId, iso, timerKey, isDuration) {
+  const el=document.getElementById(elId);
+  if(!el) return;
+  const tick=()=>{
+    const d=new Date(iso)-new Date(), tm=Math.floor(d/60000);
+    if(d<=0){el.textContent='OVERDUE';el.className='etc-val urg'+(isDuration?' qc':'');return;}
+    const h=Math.floor(tm/60),m=tm%60;
+    el.textContent=h>0?`${h}h ${m}m`:`${m}m`;
+    el.className='etc-val '+(isDuration?'qc':(tm<30?'urg':tm<120?'soon':'ok'));
+  };
+  tick();
+  etcIv[timerKey]=setInterval(tick,10000);
+}
+
+function rebuildSim() {
+  // Repurposed: was the FG-sim station dropdown, now updates SQL status chips
+  const fgLbl = document.getElementById('fg-status-lbl');
+  const tsLbl = document.getElementById('ts-status-lbl');
+  if (fgLbl) {
+    const fgStatusText = {ok:'FG: live ✓', no_pyodbc:'FG: pyodbc not installed', error:'FG: SQL error'}[BD.fg_status] || 'FG: —';
+    fgLbl.textContent = fgStatusText;
+    fgLbl.style.color = BD.fg_status==='ok' ? 'var(--green)' : (BD.fg_status ? 'var(--red)' : 'var(--text3)');
+  }
+  if (tsLbl) {
+    const tsStatusText = {ok:'TimeStudy: live ✓', no_pyodbc:'TimeStudy: pyodbc not installed', error:'TimeStudy: SQL error'}[BD.ts_status] || 'TimeStudy: —';
+    tsLbl.textContent = tsStatusText;
+    tsLbl.style.color = BD.ts_status==='ok' ? 'var(--green)' : (BD.ts_status ? 'var(--red)' : 'var(--text3)');
+  }
+}
+
+// ── PDO drag ───────────────────────────────────────────────────────────────────
+function onCardDragStart(e) {
+  const c=e.currentTarget;
+  // SYNCHRONOUS — must happen before any dragover fires
+  DS={type:'pdo', id:c.dataset.id, fromLoc:c.dataset.loc, fromBin:c.dataset.bin, fromIdx:parseInt(c.dataset.idx)};
+  const g=c.cloneNode(true);
+  Object.assign(g.style,{position:'fixed',top:'-9999px',left:'-9999px',width:c.offsetWidth+'px',pointerEvents:'none',zIndex:'9999',opacity:'0.9'});
+  document.body.appendChild(g);
+  e.dataTransfer.setDragImage(g,c.offsetWidth/2,28);
+  e.dataTransfer.effectAllowed='move';
+  // Defer visual so ghost uses pre-dim version
+  requestAnimationFrame(()=>{ c.classList.add('dragging'); g.remove(); });
+}
+function onCardDragEnd(e) {
+  document.querySelectorAll('.card.dragging').forEach(c=>c.classList.remove('dragging'));
+  document.querySelectorAll('.card.over-top,.card.over-bot').forEach(c=>c.classList.remove('over-top','over-bot'));
+
+  // If DS is STILL set here, no valid drop handler consumed this drag (every
+  // real drop handler clears DS as its first step) — meaning the card was
+  // released on blank space, or on the general PDO pool (which has no drop
+  // handler of its own). Either way, that means "take it off the board."
+  if (DS && DS.type === 'pdo' && DS.fromLoc !== 'queue') {
+    const { fromLoc, fromBin, id } = DS;
+    removePDO(fromLoc, fromBin, id);
+  }
+  DS = null;
+}
+
+// ── Bin events ─────────────────────────────────────────────────────────────────
+function onBinOver(e) {
+  if(!DS||DS.type!=='pdo') return;
+  e.preventDefault(); e.stopPropagation();
+  const btype=e.currentTarget.dataset.btype;
+  e.currentTarget.classList.remove('over-g','over-b');
+  e.currentTarget.classList.add(btype==='inprogress'?'over-g':'over-b');
+  e.dataTransfer.dropEffect='move';
+}
+function onBinLeave(e) {
+  e.currentTarget.classList.remove('over-g','over-b');
+}
+async function onBinDrop(e) {
+  e.preventDefault(); e.stopPropagation();
+  const bin=e.currentTarget;
+  bin.classList.remove('over-g','over-b');
+  if(!DS||DS.type!=='pdo') return;
+
+  const toS=bin.dataset.sid, toB=bin.dataset.btype;
+  const {id,fromLoc,fromBin}=DS;
+  DS=null;
+
+  if(fromLoc===toS&&fromBin===toB&&toB==='inprogress') return; // no-op only for inprogress; queue drops always append
+
+  if (toB === 'inprogress') {
+    // ── Optimistic instant move — singleton bin, safe to DOM-swap directly ──
+    const srcCard = document.querySelector(`.card[data-id="${id}"]`);
+    const destBin = document.getElementById(`bip-${toS}`);
+    const occCard = destBin && destBin.querySelector('.card');
+    if (occCard) {
+      if (occCard.dataset.id === id) return;   // dropped the running order on itself
+      // Occupied → swap: the dragged order runs, the current one moves to the
+      // FRONT of this station's queue (position 0). Confirm first (in-page dialog).
+      if (!await webConfirm(t('confirm_replace_running'))) return;
+      const ok = await callReplaceInprogress(toS, id);
+      if (!ok) toast('⚠ Swap failed', 'err');
+      const d = await fetch(`/api/board/${AREA}`).then(r=>r.json()).catch(()=>null);
+      if (d) { BD=d; renderOneStation(toS); if(fromLoc!=='queue'&&fromLoc!==toS) renderOneStation(fromLoc); rebuildSim(); updateBar(); }
+      return;
+    }
+
+    if (srcCard && destBin) {
+      const empty = destBin.querySelector('.bempty');
+      if (empty) empty.remove();
+      srcCard.dataset.loc = toS; srcCard.dataset.bin = toB;
+      let rmBtn = srcCard.querySelector('.crm');
+      if (!rmBtn) {
+        rmBtn = document.createElement('button');
+        rmBtn.className='crm'; rmBtn.textContent='✕';
+        rmBtn.addEventListener('click',e=>{e.stopPropagation();removePDO(toS,toB,id);});
+        srcCard.appendChild(rmBtn);
+      }
+      rmBtn.dataset.s=toS; rmBtn.dataset.b=toB;
+      destBin.appendChild(srcCard);
+      const col = document.getElementById(`station-${toS}`);
+      if (col) col.classList.add('active');
+    }
+
+    let ok = (fromLoc==='queue') ? await callAssign(toS,toB,id) : await callMove(fromLoc,fromBin,toS,toB,id);
+    if (!ok) { toast('Assignment failed — reverting','err'); forceLoad(); }
+    else {
+      const d = await fetch(`/api/board/${AREA}`).then(r=>r.json()).catch(()=>null);
+      if (d) { BD=d; renderOneStation(toS); if(fromLoc!=='queue'&&fromLoc!==toS) renderOneStation(fromLoc); rebuildSim(); updateBar(); }
+    }
+  } else {
+    // ── Queue target — always appends to end; refresh affected column(s) after ──
+    await appendToQueue(toS, fromLoc, fromBin, id);
+  }
+}
+
+async function appendToQueue(toS, fromLoc, fromBin, id) {
+  let ok = (fromLoc==='queue') ? await callAssign(toS,'queue',id) : await callMove(fromLoc,fromBin,toS,'queue',id);
+  if (!ok) { toast('Assignment failed','err'); return; }
+  const d = await fetch(`/api/board/${AREA}`).then(r=>r.json()).catch(()=>null);
+  if (d) {
+    BD = d;
+    renderOneStation(toS);
+    if (fromLoc!=='queue' && fromLoc!==toS) renderOneStation(fromLoc);
+    renderQueue();
+    rebuildSim(); updateBar();
+  }
+}
+
+// ── Queue row drag (reorder within a station's queue) ─────────────────────────
+function onQRowDragStart(e) {
+  e.stopPropagation();
+  const row = e.currentTarget;
+  DS = {type:'pdo', id:row.dataset.id, fromLoc:row.dataset.sid, fromBin:'queue',
+        fromIdx: parseInt(row.dataset.idx)};
+  const g = row.cloneNode(true);
+  Object.assign(g.style,{position:'fixed',top:'-9999px',left:'-9999px',width:row.offsetWidth+'px',pointerEvents:'none',zIndex:'9999',opacity:'0.9'});
+  document.body.appendChild(g);
+  e.dataTransfer.setDragImage(g,20,14);
+  e.dataTransfer.effectAllowed='move';
+  requestAnimationFrame(()=>{ row.classList.add('dragging'); g.remove(); });
+}
+function onQRowDragEnd(e) {
+  document.querySelectorAll('.qrow.dragging').forEach(r=>r.classList.remove('dragging'));
+  document.querySelectorAll('.qrow.over-top,.qrow.over-bot').forEach(r=>r.classList.remove('over-top','over-bot'));
+  DS=null;
+}
+function onQRowOver(e) {
+  if(!DS||DS.type!=='pdo') return;
+  e.preventDefault(); e.stopPropagation();
+  const row = e.currentTarget;
+  const rect = row.getBoundingClientRect();
+  const before = (e.clientY - rect.top) < rect.height/2;
+  row.classList.toggle('over-top', before);
+  row.classList.toggle('over-bot', !before);
+}
+function onQRowLeave(e) { e.currentTarget.classList.remove('over-top','over-bot'); }
+async function onQRowDrop(e) {
+  e.preventDefault(); e.stopPropagation();
+  const row = e.currentTarget;
+  const before = row.classList.contains('over-top');
+  row.classList.remove('over-top','over-bot');
+  if(!DS||DS.type!=='pdo') return;
+
+  const toS   = row.dataset.loc || row.dataset.sid;
+  let toIdx   = parseInt(row.dataset.idx) + (before?0:1);
+  const {id,fromLoc,fromBin,fromIdx} = DS;
+  DS=null;
+  if (id === row.dataset.id) return; // dropped on itself
+
+  let ok;
+  if (fromLoc===toS && fromBin==='queue') {
+    // Same-station reorder. The backend removes the dragged item BEFORE
+    // inserting, so when it started above the drop target every later index
+    // shifts down by one — decrement so a downward drag lands correctly.
+    if (Number.isInteger(fromIdx) && fromIdx < toIdx) toIdx -= 1;
+    ok = await callReorder(toS, id, toIdx);
+  } else if (fromLoc==='queue') {
+    ok = await callAssign(toS,'queue',id); // append then could refine position via reorder if needed
+  } else {
+    ok = await callMove(fromLoc,fromBin,toS,'queue',id);
+  }
+  if (!ok) { toast('Reorder failed','err'); return; }
+  const d = await fetch(`/api/board/${AREA}`).then(r=>r.json()).catch(()=>null);
+  if (d) {
+    BD = d;
+    renderOneStation(toS);
+    if (fromLoc!=='queue' && fromLoc!==toS) renderOneStation(fromLoc);
+    renderQueue();
+    rebuildSim(); updateBar();
+  }
+}
+
+async function removeQueueItem(station, pdoId) {
+  await fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({station,bin:'queue',pdo_id:pdoId})});
+  const d = await fetch(`/api/board/${AREA}`).then(r=>r.json()).catch(()=>null);
+  if (d) { BD=d; renderOneStation(station); renderQueue(); rebuildSim(); updateBar(); }
+}
+
+// ── Worker drag ────────────────────────────────────────────────────────────────
+function onWorkerDragStart(e) {
+  const c=e.currentTarget;
+  // fromStation is set only when dragging a tag that's already on a station
+  // (a .wtag has data-sid) — pool chips have no data-sid, so it stays null.
+  DS={type:'worker', wid:String(c.dataset.wid), wname:c.dataset.wname, fromStation:c.dataset.sid||null};
+  const g=c.cloneNode(true);
+  Object.assign(g.style,{position:'fixed',top:'-9999px',left:'-9999px',width:c.offsetWidth+'px',pointerEvents:'none',zIndex:'9999',opacity:'0.9'});
+  document.body.appendChild(g);
+  e.dataTransfer.setDragImage(g,c.offsetWidth/2,20);
+  e.dataTransfer.effectAllowed='move';
+  requestAnimationFrame(()=>{ c.classList.add('dragging'); g.remove(); });
+}
+function onWorkerDragEnd(e) {
+  document.querySelectorAll('.wchip.dragging,.wtag.dragging').forEach(c=>c.classList.remove('dragging'));
+  DS=null;
+}
+function onWorkerOver(e) {
+  if(!DS||DS.type!=='worker') return;
+  e.preventDefault(); e.stopPropagation();
+  e.currentTarget.classList.add('over');
+}
+function onWorkerLeave(e) { e.currentTarget.classList.remove('over'); }
+let _wdropSeq = 0;  // monotonic id — lets the newest drop win, so a slow earlier
+                    // /api/board response can't clobber the board with stale state.
+async function onWorkerDrop(e,station) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('over');
+  if(!DS||DS.type!=='worker') return;
+  const wid=DS.wid; let fromStation=DS.fromStation; DS=null;
+  if (fromStation === station) return;  // dropped back on the same station — no-op
+  // A pool drag carries no source station, but the worker may already be
+  // staffed elsewhere (assigned workers stay in the pool, dimmed). Find that
+  // station so we remove them there too — an operator is only on one station.
+  if (!fromStation && BD.board) {
+    for (const [sid,st] of Object.entries(BD.board)) {
+      if ((st.workers||[]).map(String).includes(wid)) { fromStation=sid; break; }
+    }
+    if (fromStation === station) return;  // already on the target — nothing to do
+  }
+  const st=BD.board[station]||{};
+  const cur=(st.workers||[]).map(String);
+  if(cur.includes(wid)){toast(t('already_here'),'warn');return;}
+
+  // ── Optimistic UI ──
+  // 1) add the tag to the target station
+  const sw=document.getElementById(`sw-${station}`);
+  if(sw) {
+    const w=(BD.workers||[]).find(x=>String(x.id)===wid);
+    const name=w?abbrevName(w.name):wid;
+    const shiftClass = w ? (w.shift==='Ca 1'?'t-ca1':w.shift==='Ca 2'?'t-ca2':'t-hc') : '';
+    const tag=document.createElement('span');
+    tag.className=`wtag ${shiftClass}`; tag.dataset.wid=wid; tag.dataset.sid=station;
+    tag.innerHTML=`${esc(name)}<span class="x" data-sid="${esc(station)}" data-wid="${esc(wid)}">×</span>`;
+    tag.querySelector('.x').addEventListener('click',ev=>{ev.stopPropagation();removeWorker(station,wid);});
+    sw.classList.remove('empty');
+    sw.appendChild(tag);
+  }
+  // 2) remove the operator's tag from the SOURCE station right away so it doesn't
+  //    linger during the round-trip (fixes the "name hangs on the old station").
+  if (fromStation) {
+    const fsw=document.getElementById(`sw-${fromStation}`);
+    if (fsw) fsw.querySelectorAll(`.wtag[data-wid="${wid}"]`).forEach(el=>el.remove());
+  }
+  // 3) mark the pool chip assigned — ONCE. The old code appended ' ✓' on every
+  //    drop, so dragging the same operator fast stacked 2–3 ticks until a later
+  //    render normalized it; the ticked flag makes it idempotent.
+  const chip=document.querySelector(`.wchip[data-wid="${wid}"]`);
+  if(chip){
+    chip.classList.add('dim');
+    const wn=chip.querySelector('.wn');
+    if(wn && !wn.dataset.ticked){ wn.textContent = wn.textContent + ' ✓'; wn.dataset.ticked='1'; }
+  }
+
+  // ── Server sync ──
+  // One call: the server enforces one-operator-one-station, so assigning here
+  // already removes wid from fromStation — no separate source-removal call
+  // (that second call was an extra round-trip that widened the race window).
+  const seq = ++_wdropSeq;
+  const updated=[...cur,wid];
+  await callWorkersAssign(station,updated);
+  const d = await fetch(`/api/board/${AREA}`).then(r=>r.json()).catch(()=>null);
+  // Only the most recent drop applies its fetch — an earlier, slower response
+  // must not overwrite the board after a newer drag has moved things on.
+  if (d && seq === _wdropSeq) {
+    BD=d;
+    renderOneStation(station);
+    if (fromStation && fromStation!==station) renderOneStation(fromStation);
+    renderWorkers();        // rebuild the pool chips → authoritative single ✓
+    rebuildSim(); updateBar();
+  }
+}
+async function removeWorker(station,wid) {
+  const st=BD.board[station]||{};
+  const updated=(st.workers||[]).map(String).filter(id=>id!==String(wid));
+  await callWorkersAssign(station,updated);
+  forceLoad();
+}
+
+// ── API calls ──────────────────────────────────────────────────────────────────
+async function callAssign(station,bin,pdoId) {
+  try {
+    const r=await fetch('/api/assign',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({station,bin,pdo_id:pdoId})});
+    const d=await r.json();
+    if(!r.ok){toast('⚠ '+d.error,'err');return false;}
+    return true;
+  } catch(err){toast(t('network_error'),'err');return false;}
+}
+async function callMove(fs,fb,ts,tb,pdoId) {
+  try {
+    const r=await fetch('/api/move',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({from_station:fs,from_bin:fb,to_station:ts,to_bin:tb,pdo_id:pdoId})});
+    const d=await r.json();
+    if(!r.ok){toast('⚠ '+d.error,'err');return false;}
+    return true;
+  } catch(err){toast(t('network_error'),'err');return false;}
+}
+async function callReorder(station,pdoId,toIndex) {
+  try {
+    const r=await fetch('/api/reorder_queue',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({station,pdo_id:pdoId,to_index:toIndex})});
+    const d=await r.json();
+    if(!r.ok){toast('⚠ '+d.error,'err');return false;}
+    return true;
+  } catch(err){toast(t('network_error'),'err');return false;}
+}
+async function callReplaceInprogress(station,pdoId) {
+  try {
+    const r=await fetch('/api/replace_inprogress',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({station,pdo_id:pdoId})});
+    const d=await r.json();
+    if(!r.ok){toast('⚠ '+d.error,'err');return false;}
+    return true;
+  } catch(err){toast(t('network_error'),'err');return false;}
+}
+async function removePDO(station,bin,pdoId) {
+  await fetch('/api/remove',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({station,bin,pdo_id:pdoId})});
+  forceLoad();
+}
+async function callWorkersAssign(station,ids) {
+  await fetch('/api/workers/assign',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({station,worker_ids:ids})});
+}
+
+// ── FG refresh (real SQL data, auto-polls every 60s server-side; this forces it now) ──
+async function refreshFG() {
+  const loader = showBlockyLoader('Refreshing FG data', [
+    ['Connecting to SQL Server…', 0.2],
+    ['Querying FG_Database_All…', 0.55],
+    ['Merging with board data…', 0.85],
+  ]);
+  try {
+    const r = await fetch('/api/refresh_fg', {method:'POST'});
+    const d = await r.json();
+    if (d.fg_status === 'ok') {
+      loader.finish('✓ FG data refreshed');
+      toast('FG data refreshed', 'ok');
+    } else if (d.fg_status === 'no_pyodbc') {
+      loader.finish('⚠ pyodbc not installed on this machine', true);
+      toast('⚠ pyodbc not installed on this machine', 'warn');
+    } else {
+      loader.finish('✗ FG refresh failed', true);
+      toast('⚠ FG refresh failed — check SQL connection', 'err');
+    }
+    resetPollCountdown();
+    forceLoad();
+  } catch (e) {
+    loader.finish('✗ FG refresh failed', true);
+    toast('⚠ FG refresh failed', 'err');
+  }
+}
+
+// ── FG poll countdown (visual only — approximates the server's 60s cycle) ─────
+let pollCountdownVal = 60;
+function resetPollCountdown() { pollCountdownVal = 60; updatePollCountdownDisplay(); }
+function updatePollCountdownDisplay() {
+  const el = document.getElementById('poll-countdown');
+  if (el) el.textContent = pollCountdownVal;
+}
+function tickPollCountdown() {
+  pollCountdownVal--;
+  if (pollCountdownVal <= 0) pollCountdownVal = 60;
+  updatePollCountdownDisplay();
+}
+
+// ── Notes ──────────────────────────────────────────────────────────────────────
+function openNote(pdoId) {
+  notePDO=pdoId;
+  document.getElementById('note-lbl').textContent=pdoId;
+  document.getElementById('note-txt').value=NM[pdoId]||'';
+  document.getElementById('note-ng-check').checked = !!NGM[pdoId];
+  const pdo = findPdoById(pdoId);
+  const excelCtx = document.getElementById('note-excel-context');
+  const excelTxt = document.getElementById('note-excel-text');
+  if (pdo && pdo.note) {
+    excelTxt.textContent = pdo.note;
+    excelCtx.style.display = '';
+  } else {
+    excelCtx.style.display = 'none';
+  }
+  document.getElementById('ov-note').classList.add('show');
+}
+function closeNote(){document.getElementById('ov-note').classList.remove('show');notePDO=null;}
+
+// In-page confirmation dialog (replaces the browser's native confirm()).
+// Returns a Promise that resolves true (Confirm) or false (Cancel / backdrop).
+let _confirmResolve = null;
+function webConfirm(message) {
+  return new Promise(resolve => {
+    _confirmResolve = resolve;
+    document.getElementById('confirm-msg').textContent = message;
+    document.getElementById('ov-confirm').classList.add('show');
+  });
+}
+function _resolveConfirm(val) {
+  document.getElementById('ov-confirm').classList.remove('show');
+  const r = _confirmResolve; _confirmResolve = null;
+  if (r) r(val);
+}
+async function saveNote(){
+  const ng = document.getElementById('note-ng-check').checked;
+  await fetch('/api/note',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({pdo_id:notePDO,note:document.getElementById('note-txt').value})});
+  await fetch('/api/ng',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({pdo_id:notePDO,ng})});
+  closeNote(); forceLoad();
+}
+
+// ── Station management ──────────────────────────────────────────────────────
+function openStationMgmt() {
+  renderStationMgmtList();
+  document.getElementById('ov-stations').classList.add('show');
+}
+function closeStationMgmt() {
+  document.getElementById('ov-stations').classList.remove('show');
+}
+function renderStationMgmtList() {
+  const el = document.getElementById('station-mgmt-list');
+  if (!BD || !BD.stations) { el.innerHTML = ''; return; }
+  el.innerHTML = BD.stations.map(sid => {
+    const st = BD.board[sid] || {};
+    const hasOrder = !!st.inprogress || (st.queue && st.queue.length > 0);
+    const hasWorkers = st.workers && st.workers.length > 0;
+    const occupied = hasOrder || hasWorkers;
+    const btnClass = occupied ? 'stn-rm warn' : 'stn-rm';
+    const btnLabel = occupied ? '⚠ In use' : '✕ Remove';
+    return `<div class="stn-row">
+      <span class="stn-id">${esc(sid)}</span>
+      <button class="${btnClass}" data-sid="${esc(sid)}" data-occupied="${occupied}">${btnLabel}</button>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.stn-rm').forEach(btn => {
+    btn.addEventListener('click', () => removeStation(btn.dataset.sid, btn.dataset.occupied === 'true'));
+  });
+}
+async function addStation() {
+  const input = document.getElementById('new-station-input');
+  const sid = input.value.trim();
+  if (!sid) { toast(t('enter_station_id'), 'warn'); return; }
+  const r = await fetch('/api/stations/add', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({station_id: sid})});
+  const d = await r.json();
+  if (!r.ok) { toast('⚠ ' + d.error, 'err'); return; }
+  input.value = '';
+  toast(`${sid} added`, 'ok');
+  await forceLoad();
+  renderStationMgmtList();
+}
+async function removeStation(sid, occupied) {
+  if (occupied) {
+    const ok = confirm(`${sid} currently has an assigned order or worker.\n\nRemove anyway? This will clear its current assignment.`);
+    if (!ok) return;
+  }
+  const r = await fetch('/api/stations/remove', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({station_id: sid, force: occupied})});
+  const d = await r.json();
+  if (!r.ok) { toast('⚠ ' + d.error, 'err'); return; }
+  toast(`${sid} removed`, 'ok');
+  await forceLoad();
+  renderStationMgmtList();
+}
+
+// ── Split PDO across stations ────────────────────────────────────────────────
+let splitPdoId = null;
+let splitRowCount = 0;
+const SPLIT_LETTERS = ['A','B','C','D'];
+
+function findPdoCurrentStation(pdoId) {
+  for (const sid of (BD.stations||[])) {
+    const st = BD.board[sid];
+    if (!st) continue;
+    if (st.inprogress && st.inprogress.id === pdoId) return sid;
+    if ((st.queue||[]).some(p => p.id === pdoId)) return sid;
+  }
+  return null;
+}
+
+let splitCurStation = null;  // PDO's current station at modal-open time, or null if unassigned
+
+function openSplitModal(pdoId) {
+  const pdo = findPdoById(pdoId);
+  if (!pdo) { toast('PDO not found', 'err'); return; }
+  splitPdoId = pdoId;
+  splitCurStation = findPdoCurrentStation(pdoId);
+  document.getElementById('split-pdo-label').textContent = pdoId;
+  document.getElementById('split-remaining-label').textContent = `${t('split_remaining_label')}: ${pdo.remaining_qty}`;
+  document.getElementById('split-rows').innerHTML = '';
+  splitRowCount = 0;
+  document.getElementById('split-add-row-btn').style.display = '';
+  addSplitRow();
+  addSplitRow();
+  document.getElementById('ov-split').classList.add('show');
+}
+function closeSplitModal() {
+  document.getElementById('ov-split').classList.remove('show');
+  splitPdoId = null;
+  splitCurStation = null;
+}
+
+function addSplitRow() {
+  if (splitRowCount >= 4) return;
+  const letter = SPLIT_LETTERS[splitRowCount];
+  const isRowA = (letter === 'A');
+  splitRowCount++;
+  const rowsEl = document.getElementById('split-rows');
+
+  const row = document.createElement('div');
+  row.className = 'split-row';
+  row.dataset.letter = letter;
+
+  if (isRowA && splitCurStation) {
+    // Row A auto-continues at the order's current station — no selector needed,
+    // just show it locked so it's clear this split inherits the existing progress.
+    row.innerHTML = `
+      <span class="split-letter">${letter}</span>
+      <span class="split-locked-station" data-station="${esc(splitCurStation)}">${esc(splitCurStation)} <span style="opacity:.7">(${t('split_current')})</span></span>
+      <input type="number" class="split-qty-input" min="1" value="1">
+      <span class="split-credit-hint" style="display:none"></span>
+    `;
+    rowsEl.appendChild(row);
+    row.querySelector('.split-qty-input').addEventListener('input', onSplitQtyInput);
+  } else {
+    const usedStations = getUsedStations();
+    const blankLabel = splitCurStation ? t('select_station') : t('split_leave_in_pool');
+    const options = `<option value="">${blankLabel}</option>` + (BD.stations||[]).map(sid => {
+      const disabled = usedStations.includes(sid) ? 'disabled' : '';
+      return `<option value="${esc(sid)}" ${disabled}>${esc(sid)}</option>`;
+    }).join('');
+    row.innerHTML = `
+      <span class="split-letter">${letter}</span>
+      <select class="split-station-select">${options}</select>
+      <input type="number" class="split-qty-input" min="1" value="1">
+      <span class="split-credit-hint" style="display:none"></span>
+      ${splitRowCount > 2 ? '<button class="split-row-rm">✕</button>' : ''}
+    `;
+    rowsEl.appendChild(row);
+    row.querySelector('.split-station-select').addEventListener('change', onSplitStationChange);
+    row.querySelector('.split-qty-input').addEventListener('input', onSplitQtyInput);
+    const rmBtn = row.querySelector('.split-row-rm');
+    if (rmBtn) rmBtn.addEventListener('click', () => { row.remove(); relabelSplitRows(); refreshSplitStationOptions(); updateSplitTotal(); });
+  }
+
+  updateSplitTotal();
+  if (splitRowCount >= 4) document.getElementById('split-add-row-btn').style.display = 'none';
+}
+
+function getUsedStations() {
+  const rowsEl = document.getElementById('split-rows');
+  const fromSelects = [...rowsEl.querySelectorAll('.split-station-select')].map(s => s.value).filter(Boolean);
+  const fromLocked  = [...rowsEl.querySelectorAll('.split-locked-station')].map(s => s.dataset.station);
+  return [...fromSelects, ...fromLocked];
+}
+
+function relabelSplitRows() {
+  const rows = document.querySelectorAll('#split-rows .split-row');
+  splitRowCount = rows.length;
+  rows.forEach((row, i) => {
+    const letter = SPLIT_LETTERS[i];
+    row.dataset.letter = letter;
+    row.querySelector('.split-letter').textContent = letter;
+  });
+  document.getElementById('split-add-row-btn').style.display = splitRowCount >= 4 ? 'none' : '';
+}
+
+function refreshSplitStationOptions() {
+  const rowsEl = document.getElementById('split-rows');
+  const selects = [...rowsEl.querySelectorAll('.split-station-select')];
+  const used = getUsedStations();
+  selects.forEach(sel => {
+    [...sel.options].forEach(opt => {
+      if (!opt.value) return;
+      opt.disabled = (opt.value !== sel.value) && used.includes(opt.value);
+    });
+  });
+}
+function onSplitStationChange() {
+  refreshSplitStationOptions();
+  updateSplitTotal();
+}
+
+function updateSplitCreditHints() {
+  const pdo = findPdoById(splitPdoId);
+  document.querySelectorAll('#split-rows .split-row').forEach(row => {
+    const locked = row.querySelector('.split-locked-station');
+    const sel = row.querySelector('.split-station-select');
+    const stationVal = locked ? locked.dataset.station : (sel ? sel.value : null);
+    const hint = row.querySelector('.split-credit-hint');
+    if (splitCurStation && stationVal === splitCurStation && pdo && pdo.completed_qty > 0) {
+      hint.style.display = '';
+      hint.textContent = `+${pdo.completed_qty} ${t('split_credit')}`;
+    } else {
+      hint.style.display = 'none';
+    }
+  });
+}
+
+// Auto-fill the 2nd box with the remaining qty once the 1st box is typed —
+// ONLY for a 2-way split (3+ stations are left to the user). Editing the 2nd
+// box directly is untouched.
+function onSplitQtyInput(e) {
+  const rows = [...document.querySelectorAll('#split-rows .split-row')];
+  if (rows.length === 2) {
+    const inputs = rows.map(r => r.querySelector('.split-qty-input'));
+    if (e && e.target === inputs[0]) {
+      const pdo = findPdoById(splitPdoId);
+      if (pdo) inputs[1].value = Math.max(0, pdo.remaining_qty - (parseInt(inputs[0].value) || 0));
+    }
+  }
+  updateSplitTotal();
+}
+
+function updateSplitTotal() {
+  const pdo = findPdoById(splitPdoId);
+  if (!pdo) return;
+  const qtyInputs = [...document.querySelectorAll('#split-rows .split-qty-input')];
+  const total = qtyInputs.reduce((sum, inp) => sum + (parseInt(inp.value) || 0), 0);
+  const remaining = pdo.remaining_qty;
+  const line = document.getElementById('split-total-line');
+  // Sum must EXACTLY equal remaining qty — no partial/leftover allocation anymore.
+  const ok = total === remaining;
+  line.textContent = `${t('split_allocated')}: ${total} / ${remaining} ${ok ? '✓' : `(${t('split_must_equal')})`}`;
+  line.style.color = ok ? 'var(--green)' : 'var(--red)';
+  document.getElementById('split-confirm-btn').disabled = !ok;
+  updateSplitCreditHints();
+}
+
+async function submitSplit() {
+  const rows = [...document.querySelectorAll('#split-rows .split-row')];
+  const splits = rows.map(row => {
+    const locked = row.querySelector('.split-locked-station');
+    const sel = row.querySelector('.split-station-select');
+    return {
+      letter: row.dataset.letter,
+      station: locked ? locked.dataset.station : (sel ? sel.value : null),
+      qty: parseInt(row.querySelector('.split-qty-input').value) || 0,
+    };
+  });
+  const r = await fetch('/api/splits/create', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({parent_id: splitPdoId, splits})});
+  const d = await r.json();
+  if (!r.ok) { toast('⚠ ' + d.error, 'err'); return; }
+  toast(`${splitPdoId} split into ${splits.length}`, 'ok');
+  closeSplitModal();
+  forceLoad();
+}
+
+let mergeParentId = null;
+
+function confirmMerge(parentId) {
+  mergeParentId = parentId;
+  document.getElementById('merge-pdo-label').textContent = parentId;
+  const sel = document.getElementById('merge-station-select');
+  sel.innerHTML = `<option value="">${t('merge_release_pool')}</option>` +
+    (BD.stations||[]).map(sid => `<option value="${esc(sid)}">${esc(sid)}</option>`).join('');
+  document.getElementById('ov-merge').classList.add('show');
+}
+function closeMergeModal() {
+  document.getElementById('ov-merge').classList.remove('show');
+  mergeParentId = null;
+}
+async function submitMerge() {
+  const targetStation = document.getElementById('merge-station-select').value || null;
+  const r = await fetch('/api/splits/merge', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({parent_id: mergeParentId, target_station: targetStation})});
+  const d = await r.json();
+  if (!r.ok) { toast('⚠ ' + d.error, 'err'); return; }
+  toast(targetStation ? `${mergeParentId} merged → ${targetStation}` : `${mergeParentId} merged → pool`, 'ok');
+  closeMergeModal();
+  forceLoad();
+}
+
+// ── Attendance Gantt chart ───────────────────────────────────────────────────
+const GANTT_DAY_START = 6.0, GANTT_DAY_END = 22.333;
+function ganttPct(t) {
+  return Math.max(0, Math.min(100, (t - GANTT_DAY_START) / (GANTT_DAY_END - GANTT_DAY_START) * 100));
+}
+
+async function openGanttModal() {
+  document.getElementById('ov-gantt').classList.add('show');
+  const rowsEl = document.getElementById('gantt-rows');
+  rowsEl.innerHTML = `<div class="gantt-empty">Loading…</div>`;
+  renderGanttHeader();
+  try {
+    const r = await fetch('/api/attendance/gantt');
+    const d = await r.json();
+    if (!r.ok) { rowsEl.innerHTML = `<div class="gantt-empty">Failed to load attendance</div>`; return; }
+    document.getElementById('gantt-date-label').textContent = d.date || '';
+    renderGanttRows(d.rows || []);
+  } catch (e) {
+    rowsEl.innerHTML = `<div class="gantt-empty">Failed to load attendance</div>`;
+  }
+}
+function closeGanttModal() {
+  document.getElementById('ov-gantt').classList.remove('show');
+}
+
+function renderGanttHeader() {
+  const header = document.getElementById('gantt-header');
+  let html = '';
+  for (let h = 6; h <= 22; h += 2) {
+    const pct = ganttPct(h);
+    html += `<span style="left:calc(160px + (100% - 170px) * ${(pct/100).toFixed(4)})">${String(h).padStart(2,'0')}:00</span>`;
+  }
+  header.innerHTML = html;
+}
+
+function renderGanttRows(rows) {
+  const el = document.getElementById('gantt-rows');
+  if (!rows.length) {
+    el.innerHTML = `<div class="gantt-empty">No attendance data available for today</div>`;
+    return;
+  }
+  const now = new Date();
+  const nowDec = now.getHours() + now.getMinutes() / 60;
+  const nowPct = ganttPct(nowDec);
+
+  el.innerHTML = rows.map(w => {
+    const shiftClass = w.shift === 'Ca 1' ? 'ca1' : w.shift === 'Ca 2' ? 'ca2' : 'hc';
+    const otLabel = w.ot_clock > 0 ? ` +${w.ot_clock}h OT` : '';
+    // Lend/borrow/note tag next to the name. A fully-lent operator is shown for
+    // visibility only (dimmed, hatched bar) — they're not in the assignable pool.
+    let note = '', rowClass = '';
+    if (w.borrow_note === 'note_window') {
+      const cap = w.cap_hours ? ` · ${w.cap_hours}h` : '';
+      note = `<span class="gnote note-win" title="${esc(w.note||'')}">🕒 ${esc(w.note||'')}${cap}</span>`;
+    } else if (w.borrow_note === 'lent_away') {
+      note = `<span class="gnote lent" title="${t('att_lent_away')}">⇥ ${t('att_lent_away')}</span>`;
+      rowClass = ' lent-away';
+    } else if (w.borrow_note === 'borrowed') {
+      note = `<span class="gnote borrowed" title="${t('att_borrowed')}">⇤ ${t('att_borrowed')}</span>`;
+    } else if (w.borrow_note === 'lent_partial') {
+      const hrs = w.lend_hours ? ` ${w.lend_hours}h` : '';
+      note = `<span class="gnote lent" title="${t('att_lent_partial')}${hrs}">⇥ ${t('att_lent_partial')}${hrs}</span>`;
+    }
+    // One bar per in-area window segment (a split shows its actual block(s));
+    // otherwise a single bar across the effective window.
+    const segs = (w.windows && w.windows.length) ? w.windows : [[w.start, w.end]];
+    const bars = segs.map(seg => {
+      const s = seg[0], e = seg[1];
+      const l = ganttPct(s), wd = Math.max(1.5, ganttPct(e) - l);
+      const lbl = `${fmtHour(s)}–${fmtHour(e)}`;
+      return `<div class="gantt-bar ${shiftClass}" style="left:${l}%;width:${wd}%" title="${esc(w.shift)} ${lbl}">${lbl}</div>`;
+    }).join('');
+    return `<div class="gantt-row${rowClass}">
+      <div class="gantt-name">${esc(w.name)}<span class="gid">${esc(w.id)}${otLabel}</span>${note}</div>
+      <div class="gantt-track">
+        ${bars}
+        <div class="gantt-now-line" style="left:${nowPct}%"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Finished PDOs report ──────────────────────────────────────────────────────
+let finishedData = [];
+let finColFilters = {};   // Excel-style per-column filters (key → Set of values)
+let finSortKey = 'finish_date', finSortDir = -1;
+const FINISHED_COLUMNS = [
+  {key:'id', label:'PDO'},
+  {key:'part', label:'Part Number'},
+  {key:'desc', label:'Part Description'},
+  {key:'qty', label:'Order Qty'},
+  {key:'dest', label:'Destination'},
+  {key:'receive_date', label:'Vendor Delivery Date'},
+  {key:'ship_date', label:'Ship Date'},
+  {key:'note', label:'Note'},
+  {key:'vendor_name', label:'Vendor'},
+  {key:'finish_date', label:'Finish Date'},
+];
+function openFinishedModal() {
+  document.getElementById('ov-finished').classList.add('show');
+  loadFinished();
+}
+function closeFinishedModal() { document.getElementById('ov-finished').classList.remove('show'); }
+async function loadFinished() {
+  const body = document.getElementById('fin-table-body');
+  body.innerHTML = `<tr><td colspan="${FINISHED_COLUMNS.length}" style="padding:20px;text-align:center;color:var(--text3)">Loading…</td></tr>`;
+  try {
+    const r = await fetch('/api/report/finished');
+    const d = await r.json();
+    if (!r.ok) { toast('⚠ ' + (d.error||'failed'), 'err'); return; }
+    finishedData = d.rows || [];
+    renderFinished();
+  } catch (e) { toast('⚠ Failed to load finished PDOs', 'err'); }
+}
+function finCell(p, key) {
+  switch (key) {
+    case 'id':   return `<td class="report-po-cell"><span class="report-po-num">${esc(p.id)}</span>${p.is_sample?'<span class="rep-tag sample">SAMPLE</span>':''}</td>`;
+    case 'desc': return `<td class="report-desc-cell" title="${esc(p.desc||'')}">${esc(p.desc||'')}</td>`;
+    case 'note': return `<td class="fin-note-cell" title="${esc(p.note||'')}">${esc(p.note||'')}</td>`;
+    case 'finish_date': return `<td>${esc(p.finish_date ? p.finish_date.slice(0,19).replace('T',' ') : '—')}</td>`;
+    case 'receive_date': return `<td>${esc(p.receive_date||'—')}</td>`;
+    case 'vendor_name':  return `<td>${esc(p.vendor_name||'—')}</td>`;
+    default: { const v = p[key]; return `<td>${esc(v!=null?v:'')}</td>`; }
+  }
+}
+// Distinct display value for the Finished report's column filters.
+function finColDisplay(p, key) {
+  switch (key) {
+    case 'receive_date': return p.receive_date || '(none)';
+    case 'vendor_name':  return p.vendor_name || '(none)';
+    case 'note':         return p.note || '(none)';
+    case 'finish_date':  return p.finish_date ? p.finish_date.slice(0,10) : '(none)';  // group by date
+    case 'qty':          return String(p.qty);
+    default: { const v = p[key]; return (v==null || v==='') ? '(none)' : String(v); }
+  }
+}
+function getFinishedFiltered() {
+  return finishedData.filter(p => {
+    for (const key in finColFilters) {
+      const set = finColFilters[key];
+      if (!set) continue;
+      if (!set.has(finColDisplay(p, key))) return false;
+    }
+    return true;
+  });
+}
+function openFinColFilter(key, btn) {
+  openFilterPopup(key, btn, finishedData, finColFilters, finColDisplay, renderFinished);
+}
+function ensureFinFilterRow() {
+  const row = document.getElementById('fin-filter-row');
+  if (!row || row.childElementCount === FINISHED_COLUMNS.length) return;
+  row.innerHTML = FINISHED_COLUMNS.map(c =>
+    `<th><button class="col-filter-btn" data-key="${c.key}"><span>▾ filter</span></button></th>`
+  ).join('');
+  row.querySelectorAll('.col-filter-btn').forEach(b => {
+    b.classList.toggle('active', !!finColFilters[b.dataset.key]);
+    b.addEventListener('click', e => { e.stopPropagation(); openFinColFilter(b.dataset.key, b); });
+  });
+}
+function clearFinFilters() {
+  finColFilters = {};
+  closeColFilter();
+  document.querySelectorAll('#fin-filter-row .col-filter-btn.active').forEach(b => b.classList.remove('active'));
+  renderFinished();
+}
+function renderFinished() {
+  const rows = getFinishedFiltered();
+  document.getElementById('fin-table-head').innerHTML = FINISHED_COLUMNS.map(c =>
+    `<th onclick="setFinSort('${c.key}')">${c.label}${finSortKey===c.key?(finSortDir>0?' ▲':' ▼'):''}</th>`
+  ).join('');
+  ensureFinFilterRow();
+  const sorted = [...rows].sort((a,b) => {
+    let av=a[finSortKey], bv=b[finSortKey];
+    if (av==null) av=''; if (bv==null) bv='';
+    if (av<bv) return -1*finSortDir;
+    if (av>bv) return 1*finSortDir;
+    return 0;
+  });
+  document.getElementById('fin-table-body').innerHTML = sorted.length
+    ? sorted.map(p => `<tr>${FINISHED_COLUMNS.map(c => finCell(p, c.key)).join('')}</tr>`).join('')
+    : `<tr><td colspan="${FINISHED_COLUMNS.length}" style="padding:20px;text-align:center;color:var(--text3)">No finished PDOs</td></tr>`;
+  document.getElementById('fin-count').textContent = `${rows.length} finished`;
+}
+function setFinSort(key) {
+  if (finSortKey===key) finSortDir *= -1; else { finSortKey=key; finSortDir=1; }
+  renderFinished();
+}
+
+// ── Report View ──────────────────────────────────────────────────────────────
+let reportData = [];
+let reportStations = [];
+let reportSortKey = 'ship_date', reportSortDir = 1;
+let reportChartMode = 'daily';
+let reportSeriesView = localStorage.getItem('report_series_view') || 'both';  // 'both' | 'recv' | 'ship'
+let reportChart = null;
+let reportCapacityHours = 0;  // today's total available labour-hours (attendance) — fallback only
+let reportCapacityByDay = {}; // { 'YYYY-MM-DD': hours } — per-day capacity; missing day = gap
+let reportChartCollapsed = localStorage.getItem('report_chart_collapsed') === '1';
+
+// ── Capacity reference line: ACTUAL (attendance) vs PLANNED (per-day plan) ──
+// PLANNED is a per-day plan set up in the dedicated "Plan capacity" window:
+// how many operators and which OT tier on each date. The reference line =
+// operators × net-hours-per-operator for that OT tier. Net-hours tiers come
+// from the server model (CAPACITY_HOURS_BY_TIER, Ca col): none 6.73h · +2h
+// 8.47h · +3h 9.08h.
+const CAP_TIER = {0: 6.73, 2: 8.47, 3: 9.08};   // OT tier → net productive hours / operator
+const CAP_OT_LABEL = {0: 'none', 2: '+2h', 3: '+3h'};
+let reportCapMode = localStorage.getItem('report_cap_mode_' + AREA) || 'actual';  // 'actual' | 'planned'
+// Per-day plan: { 'YYYY-MM-DD': { ops:Int, ot:0|2|3 } }, persisted per area.
+let plannedDays = (() => {
+  try { return JSON.parse(localStorage.getItem('report_planned_days_' + AREA)) || {}; } catch (e) { return {}; }
+})();
+function savePlannedDays() { localStorage.setItem('report_planned_days_' + AREA, JSON.stringify(plannedDays)); }
+let planRangeFrom = null, planRangeTo = null;  // dates currently shown in the editor table
+
+function applyReportChartCollapsedState() {
+  const wrap = document.getElementById('report-chart-wrap-el');
+  const btn = document.getElementById('rchart-collapse-btn');
+  // The whole canvas box is shown/hidden via the .collapsed class (CSS), so the
+  // fixed-height box never lingers when collapsed.
+  if (reportChartCollapsed) {
+    wrap.classList.add('collapsed');
+    btn.textContent = '▸ Show chart';
+  } else {
+    wrap.classList.remove('collapsed');
+    btn.textContent = '▾ Hide chart';
+  }
+}
+
+function toggleReportChart() {
+  reportChartCollapsed = !reportChartCollapsed;
+  localStorage.setItem('report_chart_collapsed', reportChartCollapsed ? '1' : '0');
+  applyReportChartCollapsedState();
+  if (!reportChartCollapsed) {
+    // Chart.js doesn't track size changes while its canvas was display:none —
+    // force a fresh render now that it's visible again instead of leaving a
+    // stale/zero-size chart.
+    renderReportChart(getReportFiltered());
+  }
+}
+
+const REPORT_COLUMNS = [
+  {key:'id', label:'PO'},
+  {key:'part', label:'Part Number'},
+  {key:'desc', label:'Description'},
+  {key:'qty', label:'Qty'},
+  {key:'dest', label:'Dest'},
+  {key:'receive_date', label:'Receive Date'},
+  {key:'ship_date', label:'Ship Date'},
+  {key:'ship_mode', label:'Ship Mode'},
+  {key:'days_left', label:'Days Left'},
+  {key:'vendor_name', label:'Vendor'},
+  {key:'docs', label:'Docs'},
+  {key:'pii_po', label:'PII PO'},
+  {key:'boxes', label:'Box Note'},
+  {key:'std_hours', label:'Std Hrs'},
+  {key:'assigned_station', label:'Station'},
+];
+
+// Per-column filter terms (key → text). Applied on top of the top-bar filters.
+let reportColFilters = {};
+
+// The distinct display value used for Excel-style column filtering.
+function reportColDisplay(p, key) {
+  switch (key) {
+    case 'receive_date':     return p.receive_date || '(none)';
+    case 'vendor_name':      return p.vendor_name || '(none)';
+    case 'boxes':            return p.boxes || '(none)';
+    case 'assigned_station': return p.assigned_station || '(unassigned)';
+    case 'days_left':        return String(p.days_left);
+    case 'qty':              return String(p.qty);
+    case 'std_hours':        return String(p.std_hours || 0);
+    default: { const v = p[key]; return (v == null || v === '') ? '(none)' : String(v); }
+  }
+}
+
+// Renders one <td> for a column — keeps header order and body order in sync.
+// The PO cell puts received/SAMPLE/LP as small icons next to the number; all
+// tags are user-select:none so copying the PO doesn't grab the tag text too.
+function reportCell(p, key) {
+  switch (key) {
+    case 'id':
+      return `<td class="report-po-cell"><span class="report-po-num">${esc(p.id)}</span>`
+           + `<span class="rep-tag ${p.received>0?'recv-yes':'recv-no'}" title="${p.received>0?'Received':'Not received'}">🛒</span>`
+           + (p.is_sample?'<span class="rep-tag sample">SAMPLE</span>':'')
+           + `<span class="rep-tag ${p.has_lp?'lp-yes':'lp-no'}" title="${p.has_lp?'Has a License Plate print record':'No License Plate record yet'}">LP</span></td>`;
+    case 'desc':
+      return `<td class="report-desc-cell" title="${esc(p.desc||'')}">${esc(p.desc||'')}</td>`;
+    case 'days_left':
+      return `<td class="report-days ${reportDaysClass(p.days_left)}">${p.days_left}d</td>`;
+    case 'std_hours':
+      return `<td>${(p.std_hours||0)}h</td>`;
+    case 'qty':
+      return `<td>${p.completed_qty||0}/${p.qty}</td>`;
+    case 'receive_date':
+      return `<td>${esc(p.receive_date||'—')}</td>`;
+    case 'vendor_name':
+      return `<td>${esc(p.vendor_name||'—')}</td>`;
+    case 'boxes':
+      return `<td style="font-style:italic;color:var(--text2)">${esc(p.boxes||'—')}</td>`;
+    case 'assigned_station':
+      return `<td>${reportStationSelectHTML(p)}</td>`;
+    default:
+      return `<td>${esc(p[key]!=null?p[key]:'')}</td>`;
+  }
+}
+
+async function openReportModal() {
+  document.getElementById('ov-report').classList.add('show');
+  applyReportChartCollapsedState();
+  // Reflect the persisted series-view choice on the toggle buttons.
+  ['both','recv','ship'].forEach(v =>
+    document.getElementById('rchart-'+v).classList.toggle('active', v===reportSeriesView));
+  applyPlannedUI();  // reflect persisted Actual/Planned mode + pattern inputs
+  await refreshReportData();
+}
+function closeReportModal() {
+  document.getElementById('ov-report').classList.remove('show');
+}
+
+async function refreshReportData() {
+  const bodyEl = document.getElementById('report-table-body');
+  bodyEl.innerHTML = `<tr><td colspan="${REPORT_COLUMNS.length}" style="padding:20px;text-align:center;color:var(--text3)">Loading…</td></tr>`;
+  try {
+    const r = await fetch('/api/report/pdos');
+    const d = await r.json();
+    if (!r.ok) { toast('⚠ Failed to load report data', 'err'); return; }
+    reportData = d.pdos || [];
+    reportStations = d.stations || [];
+    reportCapacityHours = d.capacity_hours || 0;
+    // Per-day capacity for the chart's reference line (each day from its own
+    // attendance column; days with no attendance filled are omitted → gap).
+    try {
+      const cr = await fetch('/api/report/capacity_by_day');
+      const cd = await cr.json();
+      reportCapacityByDay = (cd && cd.capacity_by_day) || {};
+    } catch (e) { reportCapacityByDay = {}; }
+    populateReportVendorFilter();
+    renderReportAll();
+  } catch (e) {
+    toast('⚠ Failed to load report data', 'err');
+  }
+}
+
+function populateReportVendorFilter() {
+  const sel = document.getElementById('rf-vendor');
+  const prev = sel.value;
+  const vendors = [...new Set(reportData.map(p => p.vendor_name).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">—</option>' + vendors.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  if (prev) sel.value = prev;
+}
+
+function getReportFiltered() {
+  const recvFrom = document.getElementById('rf-recv-from').value;
+  const recvTo   = document.getElementById('rf-recv-to').value;
+  const shipFrom = document.getElementById('rf-ship-from').value;
+  const shipTo   = document.getElementById('rf-ship-to').value;
+  const partTerm = document.getElementById('rf-part').value.toLowerCase();
+  const vendorTerm = document.getElementById('rf-vendor').value;
+  const receivedF = document.getElementById('rf-received').value;
+  const assignedF = document.getElementById('rf-assigned').value;
+
+  return reportData.filter(p => {
+    if (recvFrom && (!p.receive_date || p.receive_date < recvFrom)) return false;
+    if (recvTo && (!p.receive_date || p.receive_date > recvTo)) return false;
+    if (shipFrom && p.ship_date < shipFrom) return false;
+    if (shipTo && p.ship_date > shipTo) return false;
+    if (partTerm && !p.part.toLowerCase().includes(partTerm) && !p.id.toLowerCase().includes(partTerm)) return false;
+    if (vendorTerm && p.vendor_name !== vendorTerm) return false;
+    if (receivedF === 'yes' && !(p.received > 0)) return false;
+    if (receivedF === 'no' && (p.received > 0)) return false;
+    if (assignedF === 'yes' && !p.assigned_station) return false;
+    if (assignedF === 'no' && p.assigned_station) return false;
+    // Excel-style per-column filters: each active column holds a Set of the
+    // display values that are checked; a row passes only if its value is in the
+    // set (an empty set — everything unchecked — shows nothing, like Excel).
+    for (const key in reportColFilters) {
+      const set = reportColFilters[key];
+      if (!set) continue;
+      if (!set.has(reportColDisplay(p, key))) return false;
+    }
+    return true;
+  });
+}
+
+function reportDaysClass(d) {
+  if (d <= 3) return 'urg';
+  if (d <= 7) return 'soon';
+  return 'ok';
+}
+
+function renderReportStats(rows) {
+  const totalOrders = rows.length;
+  const totalQty = rows.reduce((s,p) => s + p.qty, 0);
+  // Remaining earned-hours, split the same way as the chart's two bar series:
+  // by receive date (blue) and by ship date (green). Uses REMAINING qty, so the
+  // figure shrinks as orders complete. An order only counts toward the receive
+  // total if it has a receive date; every order has a ship date.
+  let recvEH = 0, shipEH = 0;
+  rows.forEach(p => {
+    const rem = p.qty > 0 ? (p.std_hours||0) * (p.remaining_qty||0) / p.qty : 0;
+    if (p.receive_date) recvEH += rem;
+    if (p.ship_date)    shipEH += rem;
+  });
+  document.getElementById('report-stats').innerHTML = `
+    <div class="report-stat"><div class="report-stat-label">Orders</div><div class="report-stat-value">${totalOrders}</div></div>
+    <div class="report-stat"><div class="report-stat-label">Total Qty</div><div class="report-stat-value" style="color:var(--blue)">${totalQty}</div></div>
+    <div class="report-stat"><div class="report-stat-label">Hours Required (remaining)</div>
+      <div class="report-stat-value" style="display:flex;gap:14px;align-items:baseline">
+        <span><span style="color:#2fdb96">${shipEH.toFixed(1)}h</span><span style="font-size:.5em;color:var(--text3)"> ship</span></span>
+        <span><span style="color:#4d9fff">${recvEH.toFixed(1)}h</span><span style="font-size:.5em;color:var(--text3)"> recv</span></span>
+      </div>
+    </div>
+  `;
+}
+
+function renderReportTableHead() {
+  document.getElementById('report-table-head').innerHTML = REPORT_COLUMNS.map(c =>
+    `<th onclick="setReportSort('${c.key}')">${c.label}${reportSortKey===c.key ? (reportSortDir>0?' ▲':' ▼') : ''}</th>`
+  ).join('');
+}
+
+// Per-column filter row: one Excel-style filter button per column. Built ONCE.
+function ensureReportFilterRow() {
+  const row = document.getElementById('report-filter-row');
+  if (!row || row.childElementCount === REPORT_COLUMNS.length) return;
+  row.innerHTML = REPORT_COLUMNS.map(c =>
+    `<th><button class="col-filter-btn" data-key="${c.key}"><span>▾ filter</span></button></th>`
+  ).join('');
+  row.querySelectorAll('.col-filter-btn').forEach(b => {
+    b.classList.toggle('active', !!reportColFilters[b.dataset.key]);
+    b.addEventListener('click', e => { e.stopPropagation(); openColFilter(b.dataset.key, b); });
+  });
+}
+
+// ── Excel-style multi-select column filter popup ──────────────────────────────
+let _colFilterPop = null;
+function closeColFilter() {
+  if (_colFilterPop) { _colFilterPop.remove(); _colFilterPop = null; document.removeEventListener('mousedown', _colFilterOutside); }
+}
+function _colFilterOutside(e) {
+  if (_colFilterPop && !_colFilterPop.contains(e.target) && !e.target.closest('.col-filter-btn')) closeColFilter();
+}
+// Generic popup, shared by the PDO report and the Finished report.
+// data: rows; filters: the {key:Set} object to mutate; displayFn(p,key): the
+// distinct value; onChange(): re-render after a change.
+function openFilterPopup(key, btn, data, filters, displayFn, onChange) {
+  closeColFilter();
+  const distinct = [...new Set(data.map(p => displayFn(p, key)))]
+    .sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+  const sel = filters[key] ? new Set(filters[key]) : new Set(distinct);
+
+  const pop = document.createElement('div');
+  pop.className = 'col-filter-pop';
+  pop.innerHTML = `
+    <input class="cf-search" placeholder="🔍 Search values…">
+    <div class="col-filter-actions"><button data-a="all">Select all</button><button data-a="none">Clear</button></div>
+    <div class="cf-list"></div>
+    <button class="col-filter-done">Done</button>`;
+  document.body.appendChild(pop);
+  const listEl = pop.querySelector('.cf-list');
+  const searchEl = pop.querySelector('.cf-search');
+
+  function commit() {
+    if (sel.size === distinct.length) delete filters[key];   // all checked → no filter
+    else filters[key] = new Set(sel);
+    btn.classList.toggle('active', !!filters[key]);
+    onChange();
+  }
+  function renderList() {
+    const ft = (searchEl.value || '').toLowerCase();
+    const shown = distinct.filter(v => !ft || v.toLowerCase().includes(ft));
+    listEl.innerHTML = shown.length
+      ? shown.map(v => `<label class="cf-item"><input type="checkbox" data-v="${esc(v)}" ${sel.has(v)?'checked':''}><span title="${esc(v)}">${esc(v)}</span></label>`).join('')
+      : `<div style="padding:8px;color:var(--text3);font-size:11px">No matches</div>`;
+    listEl.querySelectorAll('input[type=checkbox]').forEach(cb => cb.addEventListener('change', () => {
+      if (cb.checked) sel.add(cb.dataset.v); else sel.delete(cb.dataset.v);
+      commit();
+    }));
+  }
+  searchEl.addEventListener('input', renderList);
+  pop.querySelectorAll('.col-filter-actions button').forEach(b => b.addEventListener('click', () => {
+    if (b.dataset.a === 'all') distinct.forEach(v => sel.add(v));
+    else sel.clear();
+    renderList(); commit();
+  }));
+  pop.querySelector('.col-filter-done').addEventListener('click', closeColFilter);
+  renderList();
+
+  const r = btn.getBoundingClientRect();
+  pop.style.left = Math.min(r.left, window.innerWidth - 272) + 'px';
+  pop.style.top = Math.min(r.bottom + 4, window.innerHeight - 380) + 'px';
+  _colFilterPop = pop;
+  setTimeout(() => document.addEventListener('mousedown', _colFilterOutside), 0);
+  searchEl.focus();
+}
+function openColFilter(key, btn) {
+  openFilterPopup(key, btn, reportData, reportColFilters, reportColDisplay, applyReportRender);
+}
+
+function reportStationSelectHTML(p) {
+  const options = ['<option value="">— Unassigned —</option>']
+    .concat(reportStations.map(s => `<option value="${esc(s)}" ${p.assigned_station===s?'selected':''}>${esc(s)}</option>`))
+    .join('');
+  return `<select class="report-station-select" data-pid="${esc(p.id)}" onchange="onReportStationChange(this)">${options}</select>`;
+}
+
+function renderReportTable(rows) {
+  const sorted = [...rows].sort((a,b) => {
+    let av = a[reportSortKey], bv = b[reportSortKey];
+    if (av === null || av === undefined) av = '';
+    if (bv === null || bv === undefined) bv = '';
+    if (av < bv) return -1*reportSortDir;
+    if (av > bv) return 1*reportSortDir;
+    return 0;
+  });
+  document.getElementById('report-table-body').innerHTML = sorted.map(p =>
+    `<tr class="${p.assigned_station ? 'report-row-assigned' : ''}">${REPORT_COLUMNS.map(c => reportCell(p, c.key)).join('')}</tr>`
+  ).join('');
+}
+
+function reportBucketKey(dateStr, mode) {
+  if (!dateStr) return null;
+  if (mode === 'daily') return dateStr;
+  const d = new Date(dateStr);
+  if (isNaN(d)) return null;
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - ((d.getDay()+6)%7));
+  return monday.toISOString().slice(0,10);
+}
+
+const VN_WEEKDAY = {0:'CN', 1:'T2', 2:'T3', 3:'T4', 4:'T5', 5:'T6', 6:'T7'}; // Date.getDay(): 0=Sun..6=Sat
+
+function cssVar(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+
+const chartDataLabelPlugin = {
+  id: 'chartDataLabelPlugin',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    const labelColor = cssVar('--text', '#f7f8fc');
+    chart.data.datasets.forEach((dataset, dsIndex) => {
+      const meta = chart.getDatasetMeta(dsIndex);
+      if (meta.hidden) return;
+      if (dataset.type === 'line') return;  // don't label the flat capacity line
+      meta.data.forEach((bar, index) => {
+        const value = dataset.data[index];
+        if (!value) return;
+        ctx.save();
+        ctx.fillStyle = labelColor;
+        ctx.font = "bold 10px 'IBM Plex Mono'";
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(value, bar.x, bar.y - 3);
+        ctx.restore();
+      });
+    });
+  }
+};
+
+function renderReportChart(rows) {
+  // Skip entirely while collapsed — no point building a chart in a hidden box,
+  // and it avoids any measurement while the box is display:none.
+  if (reportChartCollapsed) { if (reportChart) { reportChart.destroy(); reportChart = null; } return; }
+  // Remaining-only hours: std_hours is required hours for the FULL order qty,
+  // so scale it down by the fraction of qty still remaining.
+  // Default 2-week window applies only when no filter is active; a date only
+  // contributes to its bucket if it falls inside the window.
+  const windowActive = !anyReportFilterActive();
+  let startStr = null, endStr = null;
+  if (windowActive) {
+    const win = reportWindowRange();
+    startStr = _ymdLocal(win.start); endStr = _ymdLocal(win.end);
+  }
+  const inWin = ds => !windowActive || (!!ds && ds >= startStr && ds <= endStr);
+
+  const recvBuckets = {};
+  const shipBuckets = {};
+  rows.forEach(p => {
+    const remainingHrs = p.qty > 0 ? (p.std_hours||0) * (p.remaining_qty||0) / p.qty : 0;
+    if (inWin(p.receive_date)) {
+      const rKey = reportBucketKey(p.receive_date, reportChartMode);
+      if (rKey) recvBuckets[rKey] = (recvBuckets[rKey]||0) + remainingHrs;
+    }
+    if (inWin(p.ship_date)) {
+      const sKey = reportBucketKey(p.ship_date, reportChartMode);
+      if (sKey) shipBuckets[sKey] = (shipBuckets[sKey]||0) + remainingHrs;
+    }
+  });
+  // Window mode shows the full fixed axis (incl. empty days); otherwise labels
+  // are derived from whatever the filtered data produced.
+  const labels = windowActive
+    ? reportWindowLabels(reportChartMode)
+    : [...new Set([...Object.keys(recvBuckets), ...Object.keys(shipBuckets)])].sort();
+  const recvValues = labels.map(l => Math.round((recvBuckets[l]||0)*10)/10);
+  const shipValues = labels.map(l => Math.round((shipBuckets[l]||0)*10)/10);
+
+  const axisColor = cssVar('--text3', '#7d8399');
+  const gridColor = cssVar('--border', '#2a2f3d');
+  // Date (x) axis gets a larger, brighter, bolder tick so it stays readable on
+  // the big screen — the y/legend keep the smaller muted style.
+  const dateAxisColor = cssVar('--text', '#e8eaf2');
+
+  // Series-view filter: show EH receive, EH ship, or both.
+  const datasets = [];
+  if (reportSeriesView !== 'ship')
+    datasets.push({ type: 'bar', label: 'EH ngày nhận', data: recvValues, backgroundColor: '#4d9fff', borderRadius: 3, maxBarThickness: 22 });
+  if (reportSeriesView !== 'recv')
+    datasets.push({ type: 'bar', label: 'EH ngày ship', data: shipValues, backgroundColor: '#2fdb96', borderRadius: 3, maxBarThickness: 22 });
+  // Reference line = available labour-hours PER DAY (each day from its own
+  // attendance). Days with no attendance filled are null → the line shows a gap
+  // there rather than a misleading value. pointRadius keeps isolated days visible.
+  const capLabel = reportCapMode === 'planned' ? 'Giờ công kế hoạch/ngày (planned)' : 'Giờ công khả dụng/ngày';
+  datasets.push({ type: 'line', label: capLabel,
+    data: labels.map(l => capacityForLabel(l, reportChartMode)),
+    borderColor: reportCapMode === 'planned' ? '#a78bfa' : '#ff7b72', borderWidth: 2, borderDash: [6, 4],
+    pointRadius: 2.5, pointBackgroundColor: reportCapMode === 'planned' ? '#a78bfa' : '#ff7b72',
+    spanGaps: false, fill: false });
+
+  if (reportChart) reportChart.destroy();
+  const ctx = document.getElementById('reportHoursChart');
+  reportChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    plugins: [chartDataLabelPlugin],
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      layout: { padding: { top: 18, bottom: 0 } },
+      // Hovering anywhere over a day's column shows every series for that day
+      // (EH receive, EH ship, capacity) in one tooltip — not just the single
+      // bar/point under the cursor.
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: true, labels: { color: axisColor, font: {family:"'IBM Plex Mono'", size: 9}, boxHeight: 8, padding: 8 } },
+        tooltip: {
+          mode: 'index', intersect: false,
+          filter: (item) => item.parsed.y != null,   // drop a series with no value that day
+          callbacks: { label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.y}h` }
+        }
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: dateAxisColor, font: {family:"'IBM Plex Mono'", size: 14, weight: '700'},
+            maxRotation: 60, minRotation: 0, autoSkipPadding: 8,
+            callback(val, index) {
+              const raw = labels[index];
+              if (!raw) return raw;
+              const d = new Date(raw);
+              if (isNaN(d)) return raw;
+              const md = raw.slice(5); // MM-DD
+              return reportChartMode === 'daily' ? `${md} (${VN_WEEKDAY[d.getDay()]})` : md;
+            }
+          },
+          grid: { display: false }
+        },
+        y: { ticks: { color: axisColor, font: {family:"'IBM Plex Mono'", size: 9} }, grid: { color: gridColor } }
+      }
+    }
+  });
+}
+
+function setReportSort(key) {
+  if (reportSortKey === key) reportSortDir *= -1;
+  else { reportSortKey = key; reportSortDir = 1; }
+  renderReportAll();
+}
+function setReportChartMode(mode) {
+  reportChartMode = mode;
+  document.getElementById('rchart-daily').classList.toggle('active', mode==='daily');
+  document.getElementById('rchart-weekly').classList.toggle('active', mode==='weekly');
+  renderReportAll();
+}
+function setReportSeriesView(view) {
+  reportSeriesView = view;
+  localStorage.setItem('report_series_view', view);
+  ['both','recv','ship'].forEach(v =>
+    document.getElementById('rchart-'+v).classList.toggle('active', v===view));
+  renderReportChart(getReportFiltered());
+}
+
+// ── Default chart date window ─────────────────────────────────────────────────
+// With NO report filter active, the chart is limited to Monday of THIS week
+// through Sunday of NEXT week (a fixed 2-week / 14-day window). As soon as any
+// filter is applied the window is dropped and the chart spans the filtered data.
+function _ymdLocal(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function reportWindowRange() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - ((today.getDay()+6)%7)); // Mon of this week
+  const end = new Date(monday);
+  end.setDate(monday.getDate() + 13);                        // Sun of next week
+  return { start: monday, end };
+}
+function reportWindowLabels(mode) {
+  const { start, end } = reportWindowRange();
+  const days = [];
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate()+1)) days.push(_ymdLocal(new Date(d)));
+  if (mode === 'daily') return days;
+  return [...new Set(days.map(ds => reportBucketKey(ds, 'weekly')))]; // covering week buckets
+}
+function anyReportFilterActive() {
+  const ids = ['rf-recv-from','rf-recv-to','rf-ship-from','rf-ship-to','rf-part','rf-vendor','rf-received','rf-assigned'];
+  if (ids.some(id => ((document.getElementById(id)||{}).value || '') !== '')) return true;
+  return Object.keys(reportColFilters).length > 0;
+}
+
+// Capacity for one chart label. Daily: that day's value (or null → gap). Weekly:
+// the sum of the week's days that have data (null if the whole week is empty).
+// Planned capacity for ONE day = operators × net-hours-per-operator for the OT
+// tier, chosen by weekday vs weekend. Always returns a number in planned mode
+// (0 ops on a day = a real "no capacity" assertion → a continuous line, no gap).
+function plannedCapacityForDay(dateStr) {
+  const e = plannedDays[dateStr];
+  if (!e) return null;                     // no plan for this day → gap in the line
+  const ops = Number(e.ops) || 0;
+  const per = CAP_TIER[e.ot] != null ? CAP_TIER[e.ot] : CAP_TIER[0];
+  return Math.round(ops * per * 10) / 10;  // ops set to 0 → explicit 0 (planned no capacity)
+}
+
+function capacityForLabel(label, mode) {
+  // PLANNED mode: reference line = the manual weekday/weekend pattern.
+  if (reportCapMode === 'planned') {
+    if (mode === 'weekly') {
+      const start = new Date(label);
+      if (isNaN(start)) return null;
+      let sum = 0;
+      for (let k = 0; k < 7; k++) {
+        const d = new Date(start); d.setDate(start.getDate() + k);
+        sum += (plannedCapacityForDay(_ymdLocal(d)) || 0);
+      }
+      return Math.round(sum * 10) / 10;
+    }
+    return plannedCapacityForDay(label);
+  }
+  // ACTUAL mode: attendance-derived per-day capacity (missing day = gap).
+  if (mode === 'weekly') {
+    const start = new Date(label);
+    if (isNaN(start)) return null;
+    let sum = 0, any = false;
+    for (let k = 0; k < 7; k++) {
+      const d = new Date(start); d.setDate(start.getDate() + k);
+      const v = reportCapacityByDay[_ymdLocal(d)];
+      if (v != null) { sum += v; any = true; }
+    }
+    return any ? Math.round(sum * 10) / 10 : null;
+  }
+  const v = reportCapacityByDay[label];
+  return v == null ? null : v;
+}
+
+// ── Planned-capacity: mode toggle + the dedicated setup window ─────────────────
+function applyPlannedUI() {
+  const on = (reportCapMode === 'planned');
+  const a = document.getElementById('rcap-actual'), p = document.getElementById('rcap-planned');
+  if (a) a.classList.toggle('active', !on);
+  if (p) p.classList.toggle('active', on);
+}
+function setReportCapMode(mode) {
+  reportCapMode = (mode === 'planned') ? 'planned' : 'actual';
+  localStorage.setItem('report_cap_mode_' + AREA, reportCapMode);
+  applyPlannedUI();
+  renderReportChart(getReportFiltered());
+}
+
+// Refresh the report chart live if it's currently on screen (editor is on top).
+function _refreshReportChartLive() {
+  if (document.getElementById('ov-report').classList.contains('show')) {
+    renderReportChart(getReportFiltered());
+  }
+}
+
+function openPlannedModal() {
+  document.getElementById('ov-planned').classList.add('show');
+  // Default the range to today → +30d the first time (or reuse the last range).
+  const from = document.getElementById('plan-from'), to = document.getElementById('plan-to');
+  if (!from.value) { const d = new Date(); from.value = _ymdLocal(d); }
+  if (!to.value)   { const d = new Date(); d.setDate(d.getDate() + 30); to.value = _ymdLocal(d); }
+  planBuildRows();
+}
+function closePlannedModal() {
+  document.getElementById('ov-planned').classList.remove('show');
+  // Switching to Planned view isn't automatic — but if we're already showing
+  // Planned, reflect edits.
+  _refreshReportChartLive();
+}
+
+function _planDatesInRange() {
+  const from = document.getElementById('plan-from').value;
+  const to   = document.getElementById('plan-to').value;
+  const out = [];
+  if (!from || !to) return out;
+  let d = new Date(from), end = new Date(to);
+  if (isNaN(d) || isNaN(end) || end < d) return out;
+  // hard cap so a huge range can't lock the UI
+  for (let i = 0; i < 400 && d <= end; i++) { out.push(_ymdLocal(d)); d.setDate(d.getDate() + 1); }
+  return out;
+}
+
+function planBuildRows() {
+  const dates = _planDatesInRange();
+  planRangeFrom = dates[0] || null;
+  planRangeTo = dates[dates.length - 1] || null;
+  const tb = document.getElementById('plan-tbody');
+  if (!dates.length) { tb.innerHTML = `<tr><td colspan="6" style="padding:14px;text-align:center;color:var(--text3)">${t('plan_pick_range')}</td></tr>`; planUpdateSummary(); return; }
+  tb.innerHTML = dates.map(ds => {
+    const e = plannedDays[ds] || {};
+    const dow = new Date(ds).getDay();
+    const weekend = (dow === 0 || dow === 6);
+    const ops = (e.ops != null ? e.ops : '');
+    const ot  = (e.ot != null ? e.ot : 0);
+    const hrs = plannedCapacityForDay(ds);
+    return `<tr${weekend ? ' style="background:rgba(255,255,255,.03)"' : ''}>
+      <td style="font-family:'IBM Plex Mono',monospace">${ds.slice(5)}</td>
+      <td style="color:${weekend ? 'var(--amber)' : 'var(--text3)'}">${t('dow_'+dow)}</td>
+      <td><input type="number" min="0" step="1" value="${ops}" style="width:64px"
+            onchange="planSetDay('${ds}', this.value, null)"></td>
+      <td><select onchange="planSetDay('${ds}', null, this.value)">
+            <option value="0"${ot==0?' selected':''}>${t('ot_none')}</option>
+            <option value="2"${ot==2?' selected':''}>+2h</option>
+            <option value="3"${ot==3?' selected':''}>+3h</option>
+          </select></td>
+      <td id="plan-hrs-${ds}" style="font-family:'IBM Plex Mono',monospace;color:var(--text2)">${hrs==null?'—':hrs+'h'}</td>
+      <td><button class="btn" style="padding:3px 10px;font-size:12px" onclick="planCopyForward('${ds}')" title="${t('plan_copy_hint')}">${t('plan_copy_down')}</button></td>
+    </tr>`;
+  }).join('');
+  planUpdateSummary();
+}
+
+// ops arg or ot arg may be null (only the changed one is passed).
+function planSetDay(ds, ops, ot) {
+  const e = plannedDays[ds] || {ops: 0, ot: 0};
+  if (ops !== null) e.ops = Math.max(0, parseInt(ops, 10) || 0);
+  if (ot  !== null) e.ot  = parseInt(ot, 10) || 0;
+  // Drop the entry entirely if it carries no plan (blank ops) so the line gaps.
+  if (ops !== null && String(ops).trim() === '') { delete plannedDays[ds]; }
+  else { plannedDays[ds] = e; }
+  savePlannedDays();
+  const cell = document.getElementById('plan-hrs-' + ds);
+  if (cell) { const h = plannedCapacityForDay(ds); cell.textContent = (h == null ? '—' : h + 'h'); }
+  planUpdateSummary();
+  _refreshReportChartLive();
+}
+
+function planQuickFill() {
+  const ops = Math.max(0, parseInt(document.getElementById('plan-fill-ops').value, 10) || 0);
+  const ot  = parseInt(document.getElementById('plan-fill-ot').value, 10) || 0;
+  const scope = document.getElementById('plan-fill-scope').value;
+  const hasOps = document.getElementById('plan-fill-ops').value.trim() !== '';
+  _planDatesInRange().forEach(ds => {
+    const weekend = [0,6].includes(new Date(ds).getDay());
+    if (scope === 'wd' && weekend) return;
+    if (scope === 'we' && !weekend) return;
+    plannedDays[ds] = {ops: hasOps ? ops : (plannedDays[ds]?.ops || 0), ot};
+  });
+  savePlannedDays();
+  planBuildRows();
+  _refreshReportChartLive();
+}
+
+function planCopyForward(ds) {
+  const src = plannedDays[ds];
+  if (!src) { toast(t('plan_set_first'), 'warn'); return; }
+  const dates = _planDatesInRange();
+  const i = dates.indexOf(ds);
+  if (i < 0) return;
+  for (let k = i + 1; k < dates.length; k++) plannedDays[dates[k]] = {ops: src.ops, ot: src.ot};
+  savePlannedDays();
+  planBuildRows();
+  _refreshReportChartLive();
+  const otLabel = (src.ot ? '+'+src.ot+'h' : t('ot_none'));
+  toast(`${t('plan_copied')}: ${src.ops} · OT ${otLabel} → ${dates.length - i - 1} ${t('plan_days')}`, 'ok');
+}
+
+function planClearRange() {
+  _planDatesInRange().forEach(ds => { delete plannedDays[ds]; });
+  savePlannedDays();
+  planBuildRows();
+  _refreshReportChartLive();
+}
+
+function planUpdateSummary() {
+  const dates = _planDatesInRange();
+  let days = 0, opsDays = 0, hrs = 0;
+  dates.forEach(ds => { const h = plannedCapacityForDay(ds); if (h != null) { days++; hrs += h; if ((plannedDays[ds]?.ops||0) > 0) opsDays++; } });
+  const el = document.getElementById('plan-summary');
+  if (el) el.textContent = `${dates.length} ${t('plan_days')} · ${opsDays} ${t('plan_with_ops')} · ${Math.round(hrs*10)/10}h ${t('plan_total')}`;
+}
+function clearReportFilters() {
+  ['rf-recv-from','rf-recv-to','rf-ship-from','rf-ship-to','rf-part','rf-vendor','rf-received','rf-assigned']
+    .forEach(id => document.getElementById(id).value = '');
+  // clear per-column filters too (state + button highlight + any open popup)
+  reportColFilters = {};
+  closeColFilter();
+  document.querySelectorAll('#report-filter-row .col-filter-btn.active').forEach(b => b.classList.remove('active'));
+  renderReportAll();
+}
+
+// Body/stats/chart only — used by per-column filter keystrokes so the filter
+// row itself (and focus in it) is never rebuilt.
+function applyReportRender() {
+  const rows = getReportFiltered();
+  renderReportStats(rows);
+  renderReportTable(rows);
+  renderReportChart(rows);
+}
+
+function renderReportAll() {
+  renderReportTableHead();
+  ensureReportFilterRow();
+  applyReportRender();
+}
+
+async function onReportStationChange(selectEl) {
+  const pdoId = selectEl.dataset.pid;
+  const newStation = selectEl.value || null;
+  selectEl.disabled = true;
+  try {
+    const r = await fetch('/api/report/set_station', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({pdo_id: pdoId, station: newStation})});
+    const d = await r.json();
+    if (!r.ok) { toast('⚠ ' + d.error, 'err'); selectEl.disabled = false; return; }
+    const msg = newStation
+      ? `${pdoId} → ${newStation}${d.placement==='queue' ? ' (queued)' : ''}`
+      : `${pdoId} unassigned`;
+    toast(msg, 'ok');
+    // Refresh the report data so the row reflects the real state (and update
+    // the live board in the background too, since this really moved something there)
+    await refreshReportData();
+  } catch (e) {
+    toast('⚠ Network error', 'err');
+    selectEl.disabled = false;
+  }
+}
+
+['rf-recv-from','rf-recv-to','rf-ship-from','rf-ship-to','rf-part','rf-vendor','rf-received','rf-assigned'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('input', renderReportAll);
+});
+
+// ── Blocky loading overlay (mirrors the Tkinter startup loading bar) ───────────
+let _loadbarStopFn = null;
+function showBlockyLoader(titleText, stages) {
+  if (_loadbarStopFn) _loadbarStopFn();  // in case one was already running — don't stack timers
+  const overlay = document.getElementById('loadbar-overlay');
+  const titleEl = document.getElementById('loadbar-title');
+  const statusEl = document.getElementById('loadbar-status');
+  const barEl = document.getElementById('loadbar-bar');
+  titleEl.textContent = titleText;
+  statusEl.style.color = 'var(--green)';
+  overlay.classList.add('show');
+
+  const N = 24;
+  barEl.innerHTML = '';
+  const segs = [];
+  for (let i = 0; i < N; i++) {
+    const s = document.createElement('div');
+    s.className = 'loadbar-seg';
+    barEl.appendChild(s);
+    segs.push(s);
+  }
+  function draw(fraction) {
+    const filled = Math.round(Math.max(0, Math.min(1, fraction)) * N);
+    segs.forEach((s, i) => s.classList.toggle('filled', i < filled));
+  }
+
+  let stageIdx = 0;
+  let timer = null;
+  let stopped = false;
+  function animate() {
+    if (stopped) return;
+    const [text, frac] = stages[Math.min(stageIdx, stages.length - 1)];
+    statusEl.textContent = text;
+    draw(frac);
+    if (stageIdx < stages.length - 1) stageIdx++;
+    timer = setTimeout(animate, 150);
+  }
+  animate();
+
+  _loadbarStopFn = () => { stopped = true; clearTimeout(timer); overlay.classList.remove('show'); };
+
+  return {
+    finish(finalText, isError) {
+      stopped = true;
+      clearTimeout(timer);
+      draw(1);
+      statusEl.style.color = isError ? 'var(--red)' : 'var(--green)';
+      statusEl.textContent = finalText || '✓ Done';
+      setTimeout(() => { overlay.classList.remove('show'); _loadbarStopFn = null; }, 500);
+    }
+  };
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────────
+let tTimer;
+function toast(msg,type=''){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.className=`toast show ${type}`;
+  clearTimeout(tTimer); tTimer=setTimeout(()=>el.classList.remove('show'),3200);
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+initTheme();
+initLang();
+loadBoard().then(() => {
+  setInterval(loadBoard, 10000);
+  setInterval(updateBar, 30000);
+  setInterval(tickPollCountdown, 1000);
+});
+document.getElementById('ov-note').addEventListener('click',e=>{if(e.target===e.currentTarget)closeNote();});
+document.getElementById('confirm-ok').addEventListener('click',()=>_resolveConfirm(true));
+document.getElementById('confirm-cancel').addEventListener('click',()=>_resolveConfirm(false));
+document.getElementById('ov-confirm').addEventListener('click',e=>{if(e.target===e.currentTarget)_resolveConfirm(false);});
+document.getElementById('ov-stations').addEventListener('click', e=>{if(e.target===e.currentTarget)closeStationMgmt();});
+document.getElementById('ov-split').addEventListener('click', e=>{if(e.target===e.currentTarget)closeSplitModal();});
+document.getElementById('ov-merge').addEventListener('click', e=>{if(e.target===e.currentTarget)closeMergeModal();});
+document.getElementById('ov-gantt').addEventListener('click', e=>{if(e.target===e.currentTarget)closeGanttModal();});
+document.getElementById('ov-report').addEventListener('click', e=>{if(e.target===e.currentTarget)closeReportModal();});
+document.getElementById('ov-finished').addEventListener('click', e=>{if(e.target===e.currentTarget)closeFinishedModal();});
+
+// Drag an assigned card back onto the general pool to unassign it
+const poolEl = document.getElementById('pdo-queue');
+poolEl.addEventListener('dragover', e => {
+  if (!DS || DS.type !== 'pdo' || DS.fromLoc === 'queue') return;
+  e.preventDefault();
+  poolEl.classList.add('pool-drop-target');
+});
+poolEl.addEventListener('dragleave', () => poolEl.classList.remove('pool-drop-target'));
+poolEl.addEventListener('drop', e => {
+  poolEl.classList.remove('pool-drop-target');
+  if (!DS || DS.type !== 'pdo' || DS.fromLoc === 'queue') return;
+  e.preventDefault(); e.stopPropagation();
+  const { fromLoc, fromBin, id } = DS;
+  DS = null;
+  removePDO(fromLoc, fromBin, id);
+});
+</script>
+</body>
+</html>

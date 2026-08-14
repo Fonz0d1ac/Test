@@ -1,0 +1,8 @@
+data/
+startup_config.json
+worker_reset_*.json
+print_settings_*.json
+lp_suppress_*.json
+__pycache__/
+*.pyc
+*.tmp
