@@ -276,6 +276,43 @@ attaches to the operator's already-open Edge and silently produces nothing.
 Missing browser or Sumatra → `print_html_silent` returns `(False, reason)` and the
 client falls back to the browser tab. `/api/printers` reports `silent_ready`/`silent_detail`.
 
+### 4c-quater. Print performance (build `.9`) — an 11-box PDO took 30–40s
+Four separate costs, all addressed; timings are now measured per stage rather than guessed
+(`[issue timing]` console line + `timings` in the `/api/issue_ticket` response).
+- **`label_print._gfa_hex` walked all 2.6M pixels in Python** per label (~0.19s each, and
+  these are slow PCs). Now `img.tobytes()` + a 256-entry `translate` table, both C speed —
+  **byte-for-byte identical output**, verified at rotate 0/90/270. Watch the row padding:
+  PIL leaves the spare bits of each row at 0, and inverting turns them BLACK (a 1px stripe
+  down every row) — they must be masked off.
+- **ZPL ASCII compression** (`_compress_rows`): repeat counts (`G`–`Y` = 1–19, `g`–`z` =
+  20–400), `,` = fill row with white, `:` = repeat previous row. **7029 KB → 835 KB** for
+  11 labels, lossless — verified with an independent decoder over 200 random-noise cases,
+  all-white/all-black/>419-run edge cases, and the real label at every rotation. The
+  `^GFA` byte counts stay UNCOMPRESSED; decompression is transparent to the printer.
+- **Logo + font caches** (`_logo_cache`, `_font_cache`). `_bold_font` was re-opening the
+  TTF per text element. NB: a "faster" rewrite of `_decode_gfa` produced wrong pixels —
+  it was reverted; the cache alone removes the cost, so leave the per-pixel loop be.
+- **MainDatabase warm loop** (`_maindb_warm_loop`, daemon thread, refreshes just inside the
+  10-min TTL). It lives on `\\npvshare`; with only a lazy TTL, whoever clicked 🖨 first
+  after expiry paid for a cold network parse of a ~17k-row workbook.
+
+Net in-sandbox: 11 labels 2.88s → 0.46s to generate, and 8.4× less data on the wire.
+
+### 4c-quinquies. BPT layout + simplex (build `.9`)
+- **Single-sided enforced**: `printing.print_pdf_silent` passes SumatraPDF
+  `-print-settings "simplex,noscale"`. One ticket per box must never share a sheet.
+  The browser-tab fallback can't force this — the Canon queue default applies there.
+- Banner **"LẤY TEM & TIÊU CHUẨN CV"** is now a full-width band under the title (was in the
+  left column of the header flex row).
+- **Ticket-code** barcode larger/longer; **destination** barcode is the biggest and sits
+  **left-aligned under Dest** (was small and right-aligned); **PDO** barcode enlarged with
+  `write_text=False` (no caption). `code128_datauri` gained `write_text`; `module_width`
+  is the knob for physical length.
+- `PO No:` → **`PDO:`** throughout the ticket.
+- **No `PL`/`SPL` material for the FG ⇒ no pallet tag at all** (`has_pallet_mats`), instead
+  of stamping every box "no pallet".
+- Destination barcode is identical on every page — rendered ONCE, not per box.
+
 ### 4d. `app.py` integration + `printing.py`
 - **MainDatabase** parsed once, cached (`get_maindb`, 10-min TTL, path from settings, reload on change).
 - Endpoints: **`/api/printers`** (installed printers via win32, `[]` off-Windows) · **`/api/print_settings`**

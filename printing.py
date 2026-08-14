@@ -65,6 +65,7 @@ def print_pdf_to(printer_name, pdf_path):
 # falls back to the browser-tab print dialog, so printing never hard-fails.
 
 import os
+import pathlib
 import shutil
 import subprocess
 import tempfile
@@ -136,7 +137,7 @@ def html_to_pdf(html_text, pdf_path, browser_path="", timeout=90):
         "--virtual-time-budget=8000",
         "--run-all-compositor-stages-before-draw",
         f"--print-to-pdf={pdf_path}",
-        "file:///" + html_path.replace("\\", "/"),
+        pathlib.Path(html_path).as_uri(),
     ]
     r = subprocess.run(cmd, capture_output=True, timeout=timeout)
     if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
@@ -145,12 +146,20 @@ def html_to_pdf(html_text, pdf_path, browser_path="", timeout=90):
     return pdf_path
 
 
-def print_pdf_silent(pdf_path, printer_name, sumatra_path="", timeout=120):
-    """Send a PDF to a named Windows queue with no dialog, via SumatraPDF."""
+def print_pdf_silent(pdf_path, printer_name, sumatra_path="", timeout=120,
+                     settings="simplex,noscale"):
+    """Send a PDF to a named Windows queue with no dialog, via SumatraPDF.
+
+    `simplex` forces SINGLE-SIDED regardless of the queue's duplex default — a BPT
+    is one ticket per box and must never share a sheet with the next box's ticket.
+    `noscale` keeps the A5 layout at true size instead of shrink-to-fit."""
     sumatra = find_sumatra(sumatra_path)
     if not sumatra:
         raise RuntimeError("SumatraPDF.exe not found")
-    cmd = [sumatra, "-print-to", printer_name, "-silent", "-exit-when-done", pdf_path]
+    cmd = [sumatra, "-print-to", printer_name]
+    if settings:
+        cmd += ["-print-settings", settings]
+    cmd += ["-silent", "-exit-when-done", pdf_path]
     r = subprocess.run(cmd, capture_output=True, timeout=timeout)
     if r.returncode != 0:
         err = (r.stderr or b"").decode("utf-8", "replace").strip()[:300]
@@ -158,7 +167,8 @@ def print_pdf_silent(pdf_path, printer_name, sumatra_path="", timeout=120):
     return True
 
 
-def print_html_silent(html_text, printer_name, sumatra_path="", browser_path=""):
+def print_html_silent(html_text, printer_name, sumatra_path="", browser_path="",
+                      print_settings="simplex,noscale"):
     """Full silent paper path: HTML → PDF → named printer. Returns (ok, detail);
     never raises, so the caller can fall back to the browser dialog."""
     if not printer_name:
@@ -166,7 +176,7 @@ def print_html_silent(html_text, printer_name, sumatra_path="", browser_path="")
     tmp_pdf = os.path.join(tempfile.mkdtemp(prefix="bpt_pdf_"), "ticket.pdf")
     try:
         html_to_pdf(html_text, tmp_pdf, browser_path)
-        print_pdf_silent(tmp_pdf, printer_name, sumatra_path)
+        print_pdf_silent(tmp_pdf, printer_name, sumatra_path, settings=print_settings)
         return True, f"printed to {printer_name}"
     except Exception as e:
         return False, str(e)

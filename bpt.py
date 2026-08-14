@@ -24,8 +24,13 @@ from io import BytesIO
 from openpyxl.utils import column_index_from_string as _ci
 
 # ── barcode ───────────────────────────────────────────────────────────────────
-def code128_datauri(data, module_height=7.0, font_size=8, module_width=0.22):
-    """Real Code128 barcode as an inline SVG data URI (no font trick, per §13)."""
+def code128_datauri(data, module_height=7.0, font_size=8, module_width=0.22,
+                    write_text=True):
+    """Real Code128 barcode as an inline SVG data URI (no font trick, per §13).
+
+    `module_width` is the bar pitch — widening it makes the barcode physically
+    LONGER, which is what a hand scanner wants; `module_height` makes it taller.
+    `write_text=False` drops the human-readable line underneath."""
     import barcode
     from barcode.writer import SVGWriter
     import base64
@@ -35,7 +40,8 @@ def code128_datauri(data, module_height=7.0, font_size=8, module_width=0.22):
     c = barcode.get('code128', data, writer=SVGWriter())
     buf = BytesIO()
     c.write(buf, options={'module_height': module_height, 'font_size': font_size,
-                          'module_width': module_width, 'quiet_zone': 1, 'text_distance': 3})
+                          'module_width': module_width, 'quiet_zone': 1,
+                          'text_distance': 3, 'write_text': write_text})
     b64 = base64.b64encode(buf.getvalue()).decode('ascii')
     return "data:image/svg+xml;base64," + b64
 
@@ -299,15 +305,29 @@ def render_html(ticket, min_rows=16):
     BPT (three Code128 barcodes: ticket-code/box-count, destination, PDO). The
     'LẤY TEM & TIÊU CHUẨN CV' banner prints only on the first ticket of the PDO
     (box 1)."""
-    pdo_bc = code128_datauri(ticket['po'], module_height=12, font_size=9, module_width=0.28)
+    # PDO barcode: the one operators scan most, so it's the largest and carries no
+    # caption (the PDO is printed right next to it anyway).
+    pdo_bc = code128_datauri(ticket['po'], module_height=20, font_size=9,
+                             module_width=0.52, write_text=False)
+    # Destination is one short code and identical on every page of the ticket —
+    # render it ONCE instead of per box.
+    dest_bc = code128_datauri(ticket['dest_text'], module_height=22, font_size=13,
+                              module_width=1.1)
+    # Only claim a pallet if this FG actually has pallet-level materials.
+    has_pallet_mats = any(m.get('per_pallet') for b in ticket['boxes'] for m in b['materials'])
     pages = []
     for box in ticket['boxes']:
         ticket_bc = code128_datauri(f"{ticket['fg']}-P-{box['box_no']}/{ticket['total_boxes']}",
-                                    module_height=11, font_size=9)
-        dest_bc = code128_datauri(ticket['dest_text'], module_height=14, font_size=9, module_width=0.3)
+                                    module_height=16, font_size=9, module_width=0.42)
         final = ' <span class="final">(Final)</span>' if box['is_final'] and ticket['total_boxes'] > 1 else ''
-        pallet_tag = (' <span class="ptag">pallet on this box</span>' if box['opens_pallet']
-                      else ' <span class="ptag dim">no pallet</span>')
+        # No PL/SPL material for this FG = the box needs no pallet at all, so say
+        # nothing rather than labelling every box "no pallet".
+        if not has_pallet_mats:
+            pallet_tag = ''
+        elif box['opens_pallet']:
+            pallet_tag = ' <span class="ptag">pallet on this box</span>'
+        else:
+            pallet_tag = ' <span class="ptag dim">no pallet</span>'
         rows = list(box['materials'])
         pad = max(0, min_rows - len(rows))
         # A pallet-level material still prints on every ticket, but greyed with a
@@ -327,17 +347,17 @@ def render_html(ticket, min_rows=16):
         <div class="top">
           <div class="tl">
             <div class="title">BPT for Packaging materials</div>
-            {banner}
           </div>
           <div class="tr">
             <div class="lbl">Ticket code number</div>
             <img class="ticketbc" src="{ticket_bc}" alt="ticket code">
           </div>
         </div>
+        {banner}
 
         <table class="meta">
           <tr><td class="k">Date:</td><td>{_esc(ticket.get('date',''))}</td>
-              <td class="k">PO No:</td><td class="mono">{_esc(ticket['po'])}</td>
+              <td class="k">PDO:</td><td class="mono">{_esc(ticket['po'])}</td>
               <td class="k">WI:</td><td>{_esc(ticket['wi'])}</td></tr>
           <tr><td class="k">Ticket issue time:</td><td>{_esc(ticket.get('issue_time',''))}</td>
               <td class="k">FG No:</td><td class="mono">{_esc(ticket['fg'])}</td>
@@ -355,7 +375,7 @@ def render_html(ticket, min_rows=16):
         </table>
 
         <div class="pdoblock">
-          <span class="k">PO No:</span> <span class="mono">{_esc(ticket['po'])}</span>
+          <span class="k">PDO:</span> <span class="mono pdotxt">{_esc(ticket['po'])}</span>
           <img class="pdobc" src="{pdo_bc}" alt="PDO">
         </div>
 
@@ -375,11 +395,14 @@ def render_html(ticket, min_rows=16):
   .ticket:last-child {{ page-break-after: auto; }}
   .top {{ display: flex; align-items: flex-start; justify-content: space-between; }}
   .title {{ font-size: 15px; font-weight: 700; border-bottom: 2px solid #111; display: inline-block; padding-bottom: 1px; }}
-  .banner {{ margin-top: 5px; background: #111; color: #fff; font-weight: 700; padding: 3px 8px; display: inline-block; font-size: 12px; letter-spacing: .02em; }}
-  .banner-sp {{ height: 22px; }}
+  /* full-width band directly under the header, above the meta grid */
+  .banner {{ margin: 4px 0 2px; background: #111; color: #fff; font-weight: 700;
+             padding: 4px 10px; display: block; font-size: 13px; letter-spacing: .03em;
+             text-align: center; }}
+  .banner-sp {{ height: 6px; }}
   .tr {{ text-align: center; }}
   .tr .lbl {{ font-size: 10px; font-weight: 700; }}
-  .ticketbc {{ height: 40px; }}
+  .ticketbc {{ height: 58px; }}
   table.meta {{ width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 11px; }}
   table.meta td {{ padding: 2px 5px; vertical-align: middle; }}
   table.meta td.k {{ font-weight: 700; white-space: nowrap; }}
@@ -389,12 +412,14 @@ def render_html(ticket, min_rows=16):
   .ptag.dim {{ background: #ddd; color: #555; }}
   table.mat tr.zero td {{ color: #999; }}
   .dest {{ font-weight: 700; font-size: 13px; }}
-  .bc {{ text-align: right; }}
-  .destbc {{ height: 34px; }}
+  /* destination barcode sits under the Dest field, left-aligned with it */
+  .bc {{ text-align: left; padding-top: 1px !important; }}
+  .destbc {{ height: 64px; }}
   .muf {{ font-style: italic; text-align: left; white-space: nowrap; }}
   .final {{ color: #b00; }}
   .pdoblock {{ margin: 3px 0 4px; }}
-  .pdobc {{ display: block; height: 42px; margin-top: 1px; }}
+  .pdotxt {{ font-size: 13px; font-weight: 700; }}
+  .pdobc {{ display: block; height: 58px; margin-top: 1px; }}
   table.mat {{ width: 100%; border-collapse: collapse; margin-top: 3px; font-size: 10px; }}
   table.mat th, table.mat td {{ border: 1px solid #333; padding: 2px 4px; text-align: left; height: 16px; }}
   table.mat th {{ background: #e8e8e8; text-align: center; font-size: 9.5px; }}

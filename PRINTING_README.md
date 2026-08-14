@@ -107,6 +107,22 @@ Settings are saved per area in `data/print_settings_<AREA>.json`.
    - **Per-box table** — box no, qty, License Plate, and ✓/✕ per label.
    - **Warnings** — anything that didn't go to plan.
 
+## If a print feels slow
+
+The result dialog and the console both report a per-stage breakdown:
+
+```
+[issue timing] maindb 0.0s · zebra 3.1s · zebra_render 0.4s · bpt 4.2s · total 7.8s · 11 label(s)
+```
+
+- **maindb** — should be ~0. A background thread keeps MainDatabase parsed and warm,
+  so a cold read off `\\npvshare` never lands on an operator's click. A non-zero value
+  here means the warm loop is failing; check the console for `[MainDatabase]` lines.
+- **zebra** — generating **and spooling** all labels. `zebra_render` is the generation
+  part alone; the difference is time on the wire to the printer.
+- **bpt** — headless render + the Canon spool. First print after a reboot is slower
+  (browser cold start).
+
 ## Not done yet (next phase)
 - Real **License Plate mint** (reuse `Nhaplecuoingay_All`, else `max-serial+1` in a
   SQL transaction) + the `[dbo].[License Plate]` INSERT (the audit row is already

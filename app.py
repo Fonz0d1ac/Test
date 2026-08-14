@@ -23,8 +23,8 @@ warnings.filterwarnings('ignore', module='openpyxl')
 # PCs are running the same version — instead of grepping the source or, worse,
 # discovering a stale PC only when a fixed bug reappears on one area. Format:
 # YYYY.MM.DD[.n] date-based; the trailing note is just a human label.
-BUILD_VERSION = '2026.07.30.8'
-BUILD_NOTE    = 'printing: strict per-market packing standard (fixes box split), silent Canon path, blocking print-result dialog'
+BUILD_VERSION = '2026.07.30.9'
+BUILD_NOTE    = 'printing: ~14x faster ZPL + compressed graphics, warm MainDatabase, simplex BPT, ticket layout rework, per-stage timings'
 
 # ── Dev / test mode ─────────────────────────────────────────────────────────────
 # When ON, the board:
@@ -3497,9 +3497,28 @@ def get_maindb(force=False):
             and (now - c['ts']) < _MAINDB_TTL):
         return c['db']
     import bpt as _bpt
+    t0 = _t.time()
     db = _bpt.MainDB(path)      # raises if unreadable
     c.update(db=db, path=path, ts=now)
+    print(f'[MainDatabase] parsed in {_t.time() - t0:.1f}s ← {path}')
     return db
+
+def _maindb_warm_loop():
+    """Keep the MainDatabase index hot in the background.
+
+    It lives on \\\\npvshare, so a cold parse is a slow network read of a ~17k-row
+    workbook. With only a lazy 10-min TTL that cost lands on whichever operator
+    happens to click 🖨 first after it expires — they wait, staring at a frozen
+    dialog. Refreshing just inside the TTL means the print path essentially always
+    hits a warm cache. Failures are logged and retried, never fatal: the print
+    endpoint still does its own get_maindb() and reports a bad path cleanly."""
+    import time as _t
+    while True:
+        try:
+            get_maindb()
+        except Exception as e:
+            print(f'[MainDatabase] warm refresh failed (will retry): {e}')
+        _t.sleep(max(60, _MAINDB_TTL - 60))
 
 # Short-lived handoff cache: issue_ticket builds the BPT and stashes it here; the
 # browser then GETs /bpt/<token> to render + print it.
@@ -3588,6 +3607,15 @@ def api_issue_ticket():
     pm = str(d.get('pro_m', '') or '').strip() or '00'
     pro_time = f'{ph.zfill(2)}:{pm.zfill(2)}'
     warnings = []
+    # Per-stage timings. An 11-box PDO felt slow and the cost is environment-
+    # dependent (network share, printer queue, PC speed), so the breakdown is
+    # logged AND returned — no more guessing which stage is the wait.
+    import time as _t
+    _t0 = _t.time()
+    timings = {}
+    def _lap(name, since):
+        timings[name] = round(_t.time() - since, 2)
+        return _t.time()
     try:
         import bpt as _bpt, boxlabel as _bl, printing as _pr
         with _cache_lock:
@@ -3598,6 +3626,7 @@ def api_issue_ticket():
             mdb = get_maindb()
         except Exception as e:
             return jsonify({'error': f'Cannot open MainDatabase: {e}'}), 500
+        _m = _lap('maindb', _t0)
 
         po = p['id']; part = p['part']; qty = p.get('qty', 0)
         dest = p.get('dest', ''); pii = p.get('pii_po', ''); vendor = p.get('vendor', '')
@@ -3623,6 +3652,7 @@ def api_issue_ticket():
 
         lps = []
         boxes = []          # per-box outcome, shown in the confirmation dialog
+        _zpl_secs = 0.0
         if do_box:
             r = _bl.build_box_labels(mdb, po=po, part=part, po_qty=qty, dest=dest,
                                      station=station, pii=pii, desc=desc,
@@ -3639,8 +3669,11 @@ def api_issue_ticket():
                         err = 'no Zebra printer set in print settings'
                     else:
                         try:
-                            _pr.print_zpl_raw(_bl.render_zpl(L['d']),
-                                              settings['zebra_printer'], doc=f"LP {L['lp']}")
+                            _z0 = _t.time()
+                            zpl = _bl.render_zpl(L['d'])
+                            _zpl_secs += _t.time() - _z0
+                            _pr.print_zpl_raw(zpl, settings['zebra_printer'],
+                                              doc=f"LP {L['lp']}")
                             ok = True
                         except Exception as e:
                             err = str(e)
@@ -3649,6 +3682,9 @@ def api_issue_ticket():
                     boxes.append({'box_no': L['box_no'], 'qty': L['box_qty'],
                                   'lp': L['lp'], 'printed': ok, 'error': err})
                     # DUMMY LP → no [License Plate] INSERT yet (SQL phase).
+
+        _b = _lap('zebra', _m)
+        timings['zebra_render'] = round(_zpl_secs, 2)   # of which: ZPL generation
 
         bpt_token = None
         bpt_pages = 0
@@ -3681,10 +3717,15 @@ def api_issue_ticket():
                     warnings.append(f"Silent BPT print unavailable ({bpt_detail}) — "
                                     f"opening the print dialog instead")
 
+        _lap('bpt', _b)
         with _cache_lock:
             placed = _issue_place_pdo(pdo_id, station)
+        timings['total'] = round(_t.time() - _t0, 2)
+        print('[issue timing] ' + ' · '.join(f'{k} {v}s' for k, v in timings.items())
+              + f' · {len(boxes)} label(s)')
 
         return jsonify({'ok': True, 'lps': lps, 'boxes': boxes, 'std': std_info,
+                        'timings': timings,
                         'bpt_token': bpt_token, 'bpt_pages': bpt_pages,
                         'bpt_printed': bpt_printed, 'bpt_detail': bpt_detail,
                         'do_bpt': bool(do_bpt), 'do_box': bool(do_box),
@@ -4233,6 +4274,7 @@ def initialize_app():
     print(f'[startup] TimeStudy status: {_last_ts_status} | FG status: {_last_fg_status}')
     threading.Thread(target=_fg_poll_loop, daemon=True).start()
     threading.Thread(target=_dashboard_write_loop, daemon=True).start()
+    threading.Thread(target=_maindb_warm_loop, daemon=True).start()
     print(f'[startup] Shop floor dashboard feed: writing to {DASHBOARD_STATUS_DIR} every {DASHBOARD_WRITE_INTERVAL_SEC}s')
 
 if __name__ == '__main__':
