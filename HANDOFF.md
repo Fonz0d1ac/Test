@@ -313,6 +313,39 @@ Net in-sandbox: 11 labels 2.88s → 0.46s to generate, and 8.4× less data on th
   of stamping every box "no pallet".
 - Destination barcode is identical on every page — rendered ONCE, not per box.
 
+### 4c-sexies. BPT wait (build `.10`) — measured on the REAL board PC
+`maindb 1.38s · zebra 0.48s · zebra_render 0.21s · bpt 7.97s · total 9.91s · 4 labels`.
+**Two earlier theories died on this data — trust the instrumentation, not extrapolation:**
+- Zebra spooling is NOT slow (0.48s for 4 labels, incl. 0.21s generation). An earlier
+  2.25s/label reading was a first-print artefact. **Batching ZPL into one job was
+  planned and then dropped — it would buy nothing.**
+- BPT is ~8s and **roughly fixed regardless of box count**, so it dominates every issue.
+
+Fixes:
+- **The BPT now spools on a background thread** (`_start_bpt_job` → `/api/print_job/<id>`).
+  The Zebra labels and the station placement finish in <1s, so the operator was waiting
+  ~8s purely to watch a PDF reach the Canon. The result dialog opens immediately with the
+  BPT line spinning and fills it in on completion. Response time 9.91s → ~0.05s.
+  **Silent-path readiness is still checked synchronously**, so the client knows at once
+  whether to use the browser-tab fallback.
+  **A failure after the operator clicks OK re-opens as the persistent banner** — a BPT that
+  never printed must never be lost.
+  ⚠ `bpt_printed` is now False whenever a job is running; the tab fallback must check
+  `!d.bpt_job` too or the ticket prints TWICE (that bug was introduced and caught here).
+- **Persistent browser profile** (`printing._PROFILE_DIR`, under `data/`). Was a fresh
+  `mkdtemp` per print — measured **12.19s cold vs 0.65s warm**, and on Windows every newly
+  created file is antivirus-scanned. Still isolated from the operator's own Edge profile,
+  which is why the flag exists at all (a shared profile makes headless attach to their
+  running instance and silently emit nothing).
+- **Prewarm** (`printing.prewarm`): once at startup (`_print_warm_startup`) and again when
+  the Issue modal opens (`/api/prewarm_print`), so the cold launch happens while the
+  operator is typing the station rather than after they click.
+- **Lean headless flags**; dropped `--run-all-compositor-stages-before-draw` (it's for
+  screenshots) and cut the virtual-time budget 8000→2000.
+- **`[bpt print] render Xs · spool Ys`** splits the browser half from the Canon half.
+- MainDatabase is **re-warmed in the background after a print-settings save** — the save
+  invalidates the cache, which is exactly what the 1.38s `maindb` reading was.
+
 ### 4d. `app.py` integration + `printing.py`
 - **MainDatabase** parsed once, cached (`get_maindb`, 10-min TTL, path from settings, reload on change).
 - Endpoints: **`/api/printers`** (installed printers via win32, `[]` off-Windows) · **`/api/print_settings`**

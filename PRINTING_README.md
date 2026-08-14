@@ -120,8 +120,24 @@ The result dialog and the console both report a per-stage breakdown:
   here means the warm loop is failing; check the console for `[MainDatabase]` lines.
 - **zebra** — generating **and spooling** all labels. `zebra_render` is the generation
   part alone; the difference is time on the wire to the printer.
-- **bpt** — headless render + the Canon spool. First print after a reboot is slower
-  (browser cold start).
+- **bpt** — now only *building* the ticket. The Canon spool runs in the background, so
+  this should be well under a second.
+
+The Canon half is reported separately when it completes:
+
+```
+[bpt print] render 2.1s · spool 3.4s → \\10.191.56.14\vtn1prt-tanglung
+[bpt job] ok — printed to \\10.191.56.14\vtn1prt-tanglung (render 2.1s, spool 3.4s)
+```
+
+**render** is headless Edge turning the ticket into a PDF; **spool** is SumatraPDF handing
+it to the queue. The operator doesn't wait for either — the result dialog opens straight
+away and the BPT line updates itself. If it fails after they've clicked OK, a persistent
+banner appears so the failure can't be missed.
+
+First print after a reboot is slower (browser cold launch, ~12s vs under a second warm).
+The app warms it at startup and again when you open the Issue modal, so in practice that
+cost lands while the operator is still typing the station.
 
 ## Not done yet (next phase)
 - Real **License Plate mint** (reuse `Nhaplecuoingay_All`, else `max-serial+1` in a

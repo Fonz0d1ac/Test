@@ -305,6 +305,11 @@ select.btn{font-family:inherit;appearance:none;-webkit-appearance:none;padding-r
 .pr-std b{color:var(--text)}
 .pr-std .bad{color:var(--red)}
 .pr-line{font-size:12.5px;color:var(--text2);margin-bottom:4px}
+.pr-spin{color:var(--amber)}
+.pr-spin::after{content:'';display:inline-block;width:9px;height:9px;margin-left:6px;
+  vertical-align:-1px;border:2px solid var(--amber);border-right-color:transparent;
+  border-radius:50%;animation:prspin .7s linear infinite}
+@keyframes prspin{to{transform:rotate(360deg)}}
 .pr-tbl{width:100%;border-collapse:collapse;font-size:12px}
 .pr-tbl th{position:sticky;top:0;background:var(--bg3);color:var(--text3);text-align:left;
            padding:5px 8px;font-weight:600;border-bottom:1px solid var(--border2)}
@@ -1178,6 +1183,17 @@ function checkPdoStatus(status, isManualRefresh) {
 function dismissPdoStatus() {
   document.getElementById('pdo-status-banner').classList.remove('show');
 }
+// Same persistent banner, arbitrary message — used when a background print fails
+// after the operator already dismissed the result dialog, so the failure can't
+// disappear unseen. Stays until dismissed, unlike a toast.
+function showAlertBanner(icon, title, text) {
+  const banner = document.getElementById('pdo-status-banner');
+  if (!banner) return;
+  banner.querySelector('.psb-icon').textContent = icon;
+  banner.querySelector('.psb-title').textContent = title;
+  banner.querySelector('.psb-text').textContent = text;
+  banner.classList.add('show');
+}
 
 // ── Ticket / label printing ───────────────────────────────────────────────────
 let _issuePdo = null;
@@ -1192,6 +1208,9 @@ function openIssueModal(pid) {
   document.getElementById('issue-box').checked = true;
   document.getElementById('ov-issue').classList.add('show');
   setTimeout(() => document.getElementById('issue-station').focus(), 50);
+  // Warm the headless browser while the operator is still typing the station —
+  // the first launch after boot costs ~12s, later ones under a second.
+  fetch('/api/prewarm_print', {method: 'POST'}).catch(() => {});
 }
 function closeIssueModal() { document.getElementById('ov-issue').classList.remove('show'); }
 async function submitIssue() {
@@ -1211,8 +1230,11 @@ async function submitIssue() {
     const r = await fetch('/api/issue_ticket', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const d = await r.json();
     if (!r.ok) { msg.textContent = '⚠ ' + (d.error || 'failed'); go.disabled = false; return; }
-    // Only fall back to the browser print dialog when the silent path didn't run.
-    if (d.do_bpt && d.bpt_token && !d.bpt_printed) window.open('/bpt/' + d.bpt_token, '_blank');
+    // Fall back to the browser print dialog ONLY when the silent path isn't
+    // running at all. d.bpt_job means it's spooling server-side in the
+    // background — opening the tab too would print the ticket twice.
+    if (d.do_bpt && d.bpt_token && !d.bpt_job && !d.bpt_printed)
+      window.open('/bpt/' + d.bpt_token, '_blank');
     closeIssueModal();
     showPrintResult(d, station);
   } catch (e) { msg.textContent = 'Network error'; go.disabled = false; }
@@ -1225,7 +1247,6 @@ function showPrintResult(d, station) {
   const boxes = d.boxes || [], warn = d.warnings || [], std = d.std || {};
   const failed = boxes.filter(b => !b.printed).length;
   const printedN = boxes.length - failed;
-  const bptFell = d.do_bpt && !d.bpt_printed;
 
   let cls = 'ok', head = '✓ Printed';
   if (boxes.length && failed === boxes.length) { cls = 'err'; head = '✕ Nothing printed'; }
@@ -1254,10 +1275,16 @@ function showPrintResult(d, station) {
       `<br>Fix the Qty/Box block in MainDatabase.xlsx for this part, then issue again.`;
   }
 
-  document.getElementById('pr-bpt').innerHTML = !d.do_bpt ? 'BPT ticket: skipped' :
-    (d.bpt_printed
-      ? `BPT ticket: <b>${d.bpt_pages}</b> page(s) — ${esc(d.bpt_detail || 'sent to Canon')}`
-      : `BPT ticket: <b>${d.bpt_pages}</b> page(s) — opened in a tab, confirm the print dialog`);
+  // The Canon spool runs server-side in the background — show the dialog now and
+  // fill this line in when the job reports back, instead of freezing for ~8s.
+  const bptEl = document.getElementById('pr-bpt');
+  if (!d.do_bpt) bptEl.innerHTML = 'BPT ticket: skipped';
+  else if (d.bpt_job) {
+    bptEl.innerHTML = `BPT ticket: <b>${d.bpt_pages}</b> page(s) — <span class="pr-spin">sending to the Canon…</span>`;
+    pollBptJob(d.bpt_job, d.bpt_pages);
+  } else {
+    bptEl.innerHTML = `BPT ticket: <b>${d.bpt_pages}</b> page(s) — opened in a tab, confirm the print dialog`;
+  }
 
   const tbl = document.getElementById('pr-boxes');
   document.getElementById('pr-boxwrap').style.display = boxes.length ? '' : 'none';
@@ -1273,9 +1300,43 @@ function showPrintResult(d, station) {
   wEl.innerHTML = warn.length ? warn.map(w => `<div>⚠ ${esc(w)}</div>`).join('') : '';
 
   if (boxes.length) console.info(`issue: ${printedN}/${boxes.length} labels printed`);
-  if (bptFell) console.info('BPT silent path unavailable — used the browser dialog');
+  if (d.timings) console.info('issue timings', d.timings);
   document.getElementById('ov-printres').classList.add('show');
   setTimeout(() => document.getElementById('pr-ok').focus(), 60);
+}
+// Poll the background Canon job and update the BPT line in place. If the operator
+// has already clicked OK by the time it finishes, a FAILURE must not vanish — it
+// re-opens as the persistent popup, because a BPT that never printed is something
+// they have to know about.
+let _bptPoll = null;
+function pollBptJob(jobId, pages) {
+  const started = Date.now();
+  clearInterval(_bptPoll);
+  _bptPoll = setInterval(async () => {
+    let j;
+    try { j = await (await fetch('/api/print_job/' + jobId)).json(); }
+    catch (e) { return; }                       // transient — keep polling
+    if (!j.done) {
+      if (Date.now() - started > 120000) {      // stop nagging after 2 min
+        clearInterval(_bptPoll);
+        setBptLine(pages, false, 'still sending after 2 minutes — check the Canon queue');
+      }
+      return;
+    }
+    clearInterval(_bptPoll);
+    setBptLine(pages, j.ok, j.detail || (j.ok ? 'sent' : 'failed'));
+    const open = document.getElementById('ov-printres').classList.contains('show');
+    if (!j.ok && !open) showAlertBanner('⚠️', 'BPT did not print',
+      `The packaging ticket for this order was not printed: ${j.detail || 'unknown error'}. ` +
+      `Re-issue it, or print from the Canon queue manually.`);
+  }, 700);
+}
+function setBptLine(pages, ok, detail) {
+  const el = document.getElementById('pr-bpt');
+  if (!el) return;
+  el.innerHTML = `BPT ticket: <b>${pages}</b> page(s) — ` +
+    (ok ? `<span style="color:var(--green)">✓ ${esc(detail)}</span>`
+        : `<span style="color:var(--red)">✕ ${esc(detail)}</span>`);
 }
 function closePrintResult() {
   document.getElementById('ov-printres').classList.remove('show');

@@ -116,10 +116,30 @@ def silent_ready(sumatra_path="", browser_path=""):
     return True, f"{os.path.basename(b)} + {os.path.basename(s)}"
 
 
+# Dedicated, PERSISTENT browser profile. It must not be the operator's own Edge
+# profile — headless would attach to their running instance and silently produce
+# nothing — but making a fresh one per print is expensive on Windows, where every
+# newly created file gets antivirus-scanned. Created once, reused forever.
+_PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "data", "_bpt_browser_profile")
+
+# Startup work we don't need for a one-shot local render.
+_LEAN_FLAGS = [
+    "--headless=new", "--disable-gpu", "--no-first-run", "--no-sandbox",
+    "--no-pdf-header-footer",
+    "--disable-extensions", "--disable-background-networking", "--disable-sync",
+    "--disable-default-apps", "--no-default-browser-check",
+    "--disable-component-update", "--metrics-recording-only", "--mute-audio",
+    # The page is entirely local (data: URI barcodes), so it settles immediately;
+    # the budget is just a ceiling so a slow PC can't emit a half-drawn page.
+    # --run-all-compositor-stages-before-draw was dropped: it's for screenshots
+    # and only added latency here.
+    "--virtual-time-budget=2000",
+]
+
+
 def html_to_pdf(html_text, pdf_path, browser_path="", timeout=90):
-    """Render HTML to PDF with headless Chromium. Uses a throwaway user-data-dir
-    so it still works when the operator already has Edge open (a shared profile
-    makes headless silently attach to the running instance and produce nothing)."""
+    """Render HTML to PDF with headless Chromium. Returns the pdf path."""
     browser = find_browser(browser_path)
     if not browser:
         raise RuntimeError("no headless browser found (Edge/Chrome)")
@@ -127,23 +147,31 @@ def html_to_pdf(html_text, pdf_path, browser_path="", timeout=90):
     html_path = os.path.join(tmpdir, "ticket.html")
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html_text)
-    profile = os.path.join(tmpdir, "profile")
-    cmd = [
-        browser, "--headless=new", "--disable-gpu", "--no-first-run", "--no-sandbox",
-        f"--user-data-dir={profile}",
-        "--no-pdf-header-footer",
-        # data-URI barcodes decode fast, but give the renderer a budget so a slow
-        # PC can't hand us a half-drawn page.
-        "--virtual-time-budget=8000",
-        "--run-all-compositor-stages-before-draw",
-        f"--print-to-pdf={pdf_path}",
-        pathlib.Path(html_path).as_uri(),
-    ]
+    os.makedirs(_PROFILE_DIR, exist_ok=True)
+    cmd = ([browser] + _LEAN_FLAGS + [f"--user-data-dir={_PROFILE_DIR}",
+           f"--print-to-pdf={pdf_path}", pathlib.Path(html_path).as_uri()])
     r = subprocess.run(cmd, capture_output=True, timeout=timeout)
     if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
         err = (r.stderr or b"").decode("utf-8", "replace").strip()[:300]
         raise RuntimeError(f"headless render produced no PDF ({err or 'no output'})")
     return pdf_path
+
+
+def prewarm(browser_path=""):
+    """Render a trivial page to PDF and throw it away.
+
+    The first headless launch after boot is dramatically slower than later ones —
+    measured 12.2s cold vs 0.65s warm — because the browser binary isn't in the OS
+    file cache and the profile doesn't exist yet. Paying that once at startup, and
+    again when the operator opens the Issue modal, keeps it off the print click.
+    Silent and best-effort: failure here must never affect printing."""
+    try:
+        tmp = os.path.join(tempfile.mkdtemp(prefix="bptwarm_"), "w.pdf")
+        html_to_pdf("<html><body>warm</body></html>", tmp, browser_path, timeout=120)
+        shutil.rmtree(os.path.dirname(tmp), ignore_errors=True)
+        return True
+    except Exception:
+        return False
 
 
 def print_pdf_silent(pdf_path, printer_name, sumatra_path="", timeout=120,
@@ -174,9 +202,16 @@ def print_html_silent(html_text, printer_name, sumatra_path="", browser_path="",
     if not printer_name:
         return False, "no Canon printer set in print settings"
     tmp_pdf = os.path.join(tempfile.mkdtemp(prefix="bpt_pdf_"), "ticket.pdf")
+    import time as _t
+    t0 = _t.time()
     try:
         html_to_pdf(html_text, tmp_pdf, browser_path)
+        t1 = _t.time()
         print_pdf_silent(tmp_pdf, printer_name, sumatra_path, settings=print_settings)
-        return True, f"printed to {printer_name}"
+        t2 = _t.time()
+        # Split so a slow BPT can be blamed on the right half — browser render vs
+        # handing the PDF to the Canon queue.
+        print(f'[bpt print] render {t1 - t0:.1f}s · spool {t2 - t1:.1f}s → {printer_name}')
+        return True, f"printed to {printer_name} (render {t1 - t0:.1f}s, spool {t2 - t1:.1f}s)"
     except Exception as e:
         return False, str(e)

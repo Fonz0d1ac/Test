@@ -23,8 +23,8 @@ warnings.filterwarnings('ignore', module='openpyxl')
 # PCs are running the same version — instead of grepping the source or, worse,
 # discovering a stale PC only when a fixed bug reappears on one area. Format:
 # YYYY.MM.DD[.n] date-based; the trailing note is just a human label.
-BUILD_VERSION = '2026.07.30.9'
-BUILD_NOTE    = 'printing: ~14x faster ZPL + compressed graphics, warm MainDatabase, simplex BPT, ticket layout rework, per-stage timings'
+BUILD_VERSION = '2026.07.30.10'
+BUILD_NOTE    = 'printing: BPT spools in the background (dialog no longer waits ~8s), persistent+prewarmed browser profile, lean headless flags'
 
 # ── Dev / test mode ─────────────────────────────────────────────────────────────
 # When ON, the board:
@@ -3503,6 +3503,19 @@ def get_maindb(force=False):
     print(f'[MainDatabase] parsed in {_t.time() - t0:.1f}s ← {path}')
     return db
 
+def _print_warm_startup():
+    """Warm the headless browser once at startup so the first BPT of the shift
+    isn't the one that pays the ~12s cold-launch cost."""
+    try:
+        import printing as _pr
+        s = load_print_settings()
+        if not s.get('silent_bpt'):
+            return
+        ok = _pr.prewarm(s.get('browser_path', ''))
+        print(f'[print warm] headless browser {"ready" if ok else "warm-up failed (will retry on first print)"}')
+    except Exception as e:
+        print(f'[print warm] skipped: {e}')
+
 def _maindb_warm_loop():
     """Keep the MainDatabase index hot in the background.
 
@@ -3523,6 +3536,44 @@ def _maindb_warm_loop():
 # Short-lived handoff cache: issue_ticket builds the BPT and stashes it here; the
 # browser then GETs /bpt/<token> to render + print it.
 _bpt_tickets = {}
+
+# Background BPT print jobs. Handing the PDF to the Canon (headless render +
+# SumatraPDF spool) measured ~8s on the board PC, while the Zebra labels and the
+# station placement finish in well under a second. Making the operator watch that
+# is pure dead time, so the print runs on a worker thread and the result dialog
+# opens immediately and fills the outcome in when it lands.
+_print_jobs = {}
+_print_jobs_lock = threading.Lock()
+
+def _start_bpt_job(html, settings):
+    """Spool the BPT to the Canon on a worker thread. Returns a job id the client
+    polls via /api/print_job/<id>."""
+    import time as _t
+    job_id = _uuid.uuid4().hex
+    with _print_jobs_lock:
+        _print_jobs[job_id] = {'done': False, 'ok': False,
+                               'detail': 'sending to the Canon…', 'started': _t.time()}
+        if len(_print_jobs) > 50:            # bounded, like _bpt_tickets
+            for k in list(_print_jobs)[:-50]:
+                _print_jobs.pop(k, None)
+
+    def _work():
+        import printing as _pr
+        try:
+            ok, detail = _pr.print_html_silent(
+                html, settings.get('canon_printer', ''), settings.get('sumatra_path', ''),
+                settings.get('browser_path', ''))
+        except Exception as e:                # must never kill the thread silently
+            ok, detail = False, str(e)
+        with _print_jobs_lock:
+            j = _print_jobs.get(job_id)
+            if j is not None:
+                j.update(done=True, ok=ok, detail=detail,
+                         secs=round(_t.time() - j['started'], 1))
+        print(f'[bpt job] {"ok" if ok else "FAILED"} — {detail}')
+
+    threading.Thread(target=_work, daemon=True).start()
+    return job_id
 
 def _issue_place_pdo(pdo_id, station):
     """Place a printed PDO on `station` (in-progress if free, else queue) — the
@@ -3591,8 +3642,18 @@ def api_print_settings():
         if isinstance(v, list):
             s['email_recipients'] = v
     save_json(f'print_settings_{AREA}.json', s)
+    # Invalidating the cache here means the NEXT print pays the cold parse — which
+    # is exactly what a 1.38s 'maindb' reading after a settings save looks like.
+    # Re-warm in the background instead so the operator never wears it.
     _maindb_cache['db'] = None
+    threading.Thread(target=lambda: (_safe_warm_maindb(), None), daemon=True).start()
     return jsonify({'ok': True, 'settings': s})
+
+def _safe_warm_maindb():
+    try:
+        get_maindb()
+    except Exception as e:
+        print(f'[MainDatabase] re-warm after settings save failed: {e}')
 
 @app.route('/api/issue_ticket', methods=['POST'])
 def api_issue_ticket():
@@ -3690,6 +3751,7 @@ def api_issue_ticket():
         bpt_pages = 0
         bpt_printed = False
         bpt_detail = ''
+        bpt_job = None
         if do_bpt:
             t = _bpt.build_bpt(mdb, fg=part, po=po, dest=dest, station=station,
                                pro_time=pro_time, po_qty=qty, fg_desc=desc,
@@ -3706,15 +3768,17 @@ def api_issue_ticket():
             if len(_bpt_tickets) > 50:
                 for k in list(_bpt_tickets)[:-50]:
                     _bpt_tickets.pop(k, None)
-            # Silent paper path (headless render → named Canon queue). Falls back
-            # to the browser tab, which is what bpt_printed=False tells the client.
+            # Silent paper path (headless render → named Canon queue). Readiness is
+            # checked HERE, synchronously, so the client knows immediately whether
+            # to fall back to the browser tab; the slow part then runs in the
+            # background and the dialog polls it.
             if settings.get('silent_bpt') and bpt_pages:
-                html = _bpt.render_html(t)
-                bpt_printed, bpt_detail = _pr.print_html_silent(
-                    html, settings.get('canon_printer', ''),
-                    settings.get('sumatra_path', ''), settings.get('browser_path', ''))
-                if not bpt_printed:
-                    warnings.append(f"Silent BPT print unavailable ({bpt_detail}) — "
+                ready, why = _pr.silent_ready(settings.get('sumatra_path', ''),
+                                              settings.get('browser_path', ''))
+                if ready:
+                    bpt_job = _start_bpt_job(_bpt.render_html(t), settings)
+                else:
+                    warnings.append(f"Silent BPT print unavailable ({why}) — "
                                     f"opening the print dialog instead")
 
         _lap('bpt', _b)
@@ -3728,12 +3792,37 @@ def api_issue_ticket():
                         'timings': timings,
                         'bpt_token': bpt_token, 'bpt_pages': bpt_pages,
                         'bpt_printed': bpt_printed, 'bpt_detail': bpt_detail,
+                        'bpt_job': bpt_job,
                         'do_bpt': bool(do_bpt), 'do_box': bool(do_box),
                         'pdo_id': pdo_id, 'part': part, 'po_qty': qty,
                         'placed': placed, 'warnings': warnings})
     except Exception as e:
         print(f'[api_issue_ticket error] {e}')
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/print_job/<job_id>')
+def api_print_job(job_id):
+    """Poll a background BPT print. {done, ok, detail, secs}."""
+    with _print_jobs_lock:
+        j = _print_jobs.get(job_id)
+        if j is None:
+            return jsonify({'done': True, 'ok': False, 'detail': 'job expired'}), 404
+        return jsonify({k: v for k, v in j.items() if k != 'started'})
+
+@app.route('/api/prewarm_print', methods=['POST'])
+def api_prewarm_print():
+    """Fire-and-forget browser warm-up, called when the Issue modal opens.
+
+    The first headless launch after boot is ~12s vs ~0.6s warm (OS file cache +
+    profile creation). Warming while the operator is still typing the station
+    hides that entirely. Returns immediately; never blocks or errors the UI."""
+    def _w():
+        import printing as _pr
+        s = load_print_settings()
+        if s.get('silent_bpt'):
+            _pr.prewarm(s.get('browser_path', ''))
+    threading.Thread(target=_w, daemon=True).start()
+    return jsonify({'ok': True})
 
 @app.route('/bpt/<token>')
 def bpt_page(token):
@@ -4275,6 +4364,7 @@ def initialize_app():
     threading.Thread(target=_fg_poll_loop, daemon=True).start()
     threading.Thread(target=_dashboard_write_loop, daemon=True).start()
     threading.Thread(target=_maindb_warm_loop, daemon=True).start()
+    threading.Thread(target=_print_warm_startup, daemon=True).start()
     print(f'[startup] Shop floor dashboard feed: writing to {DASHBOARD_STATUS_DIR} every {DASHBOARD_WRITE_INTERVAL_SEC}s')
 
 if __name__ == '__main__':
