@@ -1,0 +1,6 @@
+# Extra deps for the ticket/label printing feature (on top of the board's flask/openpyxl).
+# On the Windows board PC:  pip install -r requirements-print.txt
+openpyxl
+pillow
+python-barcode
+pywin32 ; sys_platform == "win32"
