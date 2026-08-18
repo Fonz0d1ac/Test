@@ -24,52 +24,63 @@
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
+/* Wall board: never scroll. Everything is sized to fit the screen, and #view is
+   scaled down as a last resort if the station count outgrows the layout. */
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
-  overflow-x:hidden}
+  overflow:hidden;display:flex;flex-direction:column}
+/* #view fills what's left of the screen and hands that height to the sections,
+   which divide it in proportion to how many card rows each one needs. So the
+   cards grow to use the whole display instead of sitting in a fixed-size block
+   with dead space underneath. */
+#view{flex:1;display:flex;flex-direction:column;min-height:0;transform-origin:top left}
+.area{display:flex;flex-direction:column;min-height:0}
 
 /* ── Top bar ── */
-.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:18px;
-  padding:12px 26px;background:linear-gradient(180deg,#111624,#0d1017);border-bottom:1px solid var(--border)}
-.title{font-size:22px;font-weight:800;letter-spacing:.08em}
-.title .dot{display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--green);
-  box-shadow:0 0 10px var(--green);margin-right:10px;animation:pulse 2s infinite}
+.topbar{display:flex;align-items:center;gap:18px;
+  padding:7px 20px;background:linear-gradient(180deg,#111624,#0d1017);border-bottom:1px solid var(--border)}
+.title{font-size:17px;font-weight:800;letter-spacing:.08em}
+.title .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 10px var(--green);margin-right:9px;animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 .sp{flex:1}
-.badge{font-size:14px;padding:5px 14px;border-radius:14px;font-weight:800;letter-spacing:.05em}
+.badge{font-size:12px;padding:3px 11px;border-radius:12px;font-weight:800;letter-spacing:.05em}
 .badge.ok{background:var(--green-bg);color:var(--green)}
 .badge.stale{background:var(--red-bg);color:var(--red)}
-.clock{font-size:22px;font-family:'Consolas',monospace;color:var(--text2);font-weight:700}
+.clock{font-size:17px;font-family:'Consolas',monospace;color:var(--text2);font-weight:700}
 
 /* ── Per-area section header ──
    Each area publishes its own snapshot on its own board PC, so freshness is
    per-area: the badge lives here, not in the top bar, or one dead board would
    make the whole wall look dead (or worse, hide that it IS dead). */
-.areahdr{position:sticky;top:53px;z-index:15;display:flex;align-items:center;gap:16px;
-  padding:11px 26px 10px;background:linear-gradient(180deg,#141a27,#10141f);
+/* Not sticky: nothing scrolls, and a CSS transform on #view would break sticky
+   positioning anyway. */
+.areahdr{display:flex;align-items:center;gap:14px;
+  padding:6px 20px 5px;background:linear-gradient(180deg,#141a27,#10141f);
   border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
-.areaname{font-size:clamp(18px,1.8vw,28px);font-weight:800;letter-spacing:.1em;color:var(--text)}
-.areaname .bar{display:inline-block;width:6px;height:1em;border-radius:3px;background:var(--green);
-  margin-right:12px;vertical-align:-.12em}
-.areacount{font-size:14px;font-weight:700;color:var(--text3);letter-spacing:.04em}
+.areaname{font-size:18px;font-weight:800;letter-spacing:.1em;color:var(--text)}
+.areaname .bar{display:inline-block;width:5px;height:1em;border-radius:3px;background:var(--green);
+  margin-right:10px;vertical-align:-.12em}
+.areacount{font-size:12px;font-weight:700;color:var(--text3);letter-spacing:.04em}
 
 /* ── Station grid ── */
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;padding:16px 22px 24px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  grid-auto-rows:1fr;gap:9px;padding:10px 16px 12px;flex:1;min-height:0}
 
-.card{background:var(--panel);border:1px solid var(--border);border-radius:16px;
-  padding:16px 20px 14px 26px;position:relative;overflow:hidden;
-  display:flex;flex-direction:column;min-height:210px}
-.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:14px;background:var(--text3)}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:11px;
+  padding:9px 11px 8px 17px;position:relative;overflow:hidden;
+  display:flex;flex-direction:column;min-height:118px}
+.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:9px;background:var(--text3)}
 .card.run::before{background:var(--green)}
 .card.paused::before{background:var(--amber)}
 .card.idle::before{background:var(--border2)}
 .card.run{border-color:var(--green-dim)}
 .card.paused{border-color:var(--amber-dim)}
 
-.sid{font-size:clamp(24px,2.6vw,44px);font-weight:800;font-family:'Consolas',monospace;
-  letter-spacing:.02em;line-height:1;margin-bottom:10px}
+.sid{font-size:clamp(17px,1.35vw,25px);font-weight:800;font-family:'Consolas',monospace;
+  letter-spacing:.02em;line-height:1;margin-bottom:5px}
 
-.op{font-size:clamp(19px,2.1vw,34px);font-weight:700;line-height:1.15;margin-bottom:12px;
-  color:var(--text);display:flex;flex-wrap:wrap;gap:4px 14px}
+.op{font-size:clamp(13px,1.05vw,19px);font-weight:700;line-height:1.15;margin-bottom:6px;
+  color:var(--text);display:flex;flex-wrap:wrap;gap:2px 10px}
 .op .name{white-space:nowrap}
 .op .name.ca1{color:var(--blue)}
 .op .name.ca2{color:var(--purple)}
@@ -78,14 +89,14 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
 .op.none{color:var(--text3);font-weight:600;font-style:italic}
 
 .cur{margin-top:auto}
-.cur-pdo{font-size:clamp(22px,2.4vw,40px);font-weight:800;font-family:'Consolas',monospace;
+.cur-pdo{font-size:clamp(16px,1.3vw,24px);font-weight:800;font-family:'Consolas',monospace;
   line-height:1.05;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.cur-pn{font-size:clamp(16px,1.5vw,26px);font-weight:600;color:var(--text2);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
-.cur-idle{font-size:clamp(20px,2.2vw,34px);font-weight:800;color:var(--text3);letter-spacing:.12em}
+.cur-pn{font-size:clamp(11px,.85vw,15px);font-weight:600;color:var(--text2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.cur-idle{font-size:clamp(14px,1.15vw,21px);font-weight:800;color:var(--text3);letter-spacing:.12em}
 
-.next{margin-top:12px;border-top:1px dashed var(--border);padding-top:8px;
-  font-size:clamp(11px,.95vw,15px);color:var(--text3);font-family:'Consolas',monospace;
+.next{margin-top:6px;border-top:1px dashed var(--border);padding-top:4px;
+  font-size:clamp(9px,.62vw,12px);color:var(--text3);font-family:'Consolas',monospace;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .next b{color:var(--text2);font-weight:700}
 
@@ -203,7 +214,37 @@ function renderArea(code){
 function render(){
   document.getElementById('view').innerHTML =
     AREA_ORDER.map(code=>`<section class="area">${renderArea(code)}</section>`).join('');
+  fitToScreen();
 }
+
+// ── Fill the screen exactly ──────────────────────────────────────────────────
+// Two passes. First, give each section a share of the height proportional to the
+// number of card ROWS it actually needs — rows, not station count, because 12
+// stations across 8 columns is the same two rows as 16 would be. Then, as a
+// backstop, scale the whole thing down if it still overruns: a wall board must
+// never scroll or clip, and station counts change without anyone editing this file.
+function fitToScreen(){
+  const view = document.getElementById('view');
+  view.style.transform = 'none';
+  view.style.width = '';
+
+  document.querySelectorAll('.area').forEach(sec=>{
+    const grid = sec.querySelector('.grid');
+    if(!grid){ sec.style.flex = '0 0 auto'; return; }   // the NO DATA panel
+    const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length || 1;
+    const rows = Math.max(1, Math.ceil(grid.children.length / cols));
+    sec.style.flex = `${rows} 1 0`;
+  });
+
+  const avail = window.innerHeight - document.querySelector('.topbar').offsetHeight;
+  const need = view.scrollHeight;
+  if(need > avail && avail > 0){
+    const k = avail / need;
+    view.style.transform = `scale(${k})`;
+    view.style.width = (100 / k) + '%';   // re-widen so scaling doesn't leave a gap
+  }
+}
+window.addEventListener('resize', fitToScreen);
 
 // clock
 setInterval(()=>{ document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }, 1000);
