@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- STANDALONE stations-only wall board. Reads the same {AREA}_status.js snapshots
+     app.py already writes to the shared folder (every 5s) — NO server, and it does
+     NOT touch app.py or board.html. Drop this file into the dashboard_status share
+     (beside PK_status.js / RP_status.js) and open it.
+     Shows PACKAGING and RAW PART as two stacked sections, each with its own
+     freshness badge — no area selector, nothing to click. Each station shows, big:
+     station name, operator name(s), current PDO + part number; and small at the
+     bottom: the next queued PDO + PN. -->
+<title>Stations Map — Live</title>
+<style>
+:root{
+  --bg:#0d1017;--panel:#161b26;--panel2:#1d2431;--border:#2a3342;--border2:#3a465a;
+  --text:#f2f5fb;--text2:#aab3c5;--text3:#6b7688;
+  --green:#2fdb96;--green-bg:rgba(47,219,150,.14);--green-dim:#0f5c3d;
+  --amber:#ffb92e;--amber-bg:rgba(255,185,46,.14);--amber-dim:#7a5010;
+  --red:#ff5d5d;--red-bg:rgba(255,93,93,.14);--red-dim:#7a2020;
+  --blue:#5aa6ff;--blue-bg:rgba(90,166,255,.14);--blue-dim:#123a63;
+  --purple:#bd93f0;--purple-bg:rgba(189,147,240,.14);--purple-dim:#3d2a5a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  overflow-x:hidden}
+
+/* ── Top bar ── */
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:18px;
+  padding:12px 26px;background:linear-gradient(180deg,#111624,#0d1017);border-bottom:1px solid var(--border)}
+.title{font-size:22px;font-weight:800;letter-spacing:.08em}
+.title .dot{display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 10px var(--green);margin-right:10px;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.sp{flex:1}
+.badge{font-size:14px;padding:5px 14px;border-radius:14px;font-weight:800;letter-spacing:.05em}
+.badge.ok{background:var(--green-bg);color:var(--green)}
+.badge.stale{background:var(--red-bg);color:var(--red)}
+.clock{font-size:22px;font-family:'Consolas',monospace;color:var(--text2);font-weight:700}
+
+/* ── Per-area section header ──
+   Each area publishes its own snapshot on its own board PC, so freshness is
+   per-area: the badge lives here, not in the top bar, or one dead board would
+   make the whole wall look dead (or worse, hide that it IS dead). */
+.areahdr{position:sticky;top:53px;z-index:15;display:flex;align-items:center;gap:16px;
+  padding:11px 26px 10px;background:linear-gradient(180deg,#141a27,#10141f);
+  border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.areaname{font-size:clamp(18px,1.8vw,28px);font-weight:800;letter-spacing:.1em;color:var(--text)}
+.areaname .bar{display:inline-block;width:6px;height:1em;border-radius:3px;background:var(--green);
+  margin-right:12px;vertical-align:-.12em}
+.areacount{font-size:14px;font-weight:700;color:var(--text3);letter-spacing:.04em}
+
+/* ── Station grid ── */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;padding:16px 22px 24px}
+
+.card{background:var(--panel);border:1px solid var(--border);border-radius:16px;
+  padding:16px 20px 14px 26px;position:relative;overflow:hidden;
+  display:flex;flex-direction:column;min-height:210px}
+.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:14px;background:var(--text3)}
+.card.run::before{background:var(--green)}
+.card.paused::before{background:var(--amber)}
+.card.idle::before{background:var(--border2)}
+.card.run{border-color:var(--green-dim)}
+.card.paused{border-color:var(--amber-dim)}
+
+.sid{font-size:clamp(24px,2.6vw,44px);font-weight:800;font-family:'Consolas',monospace;
+  letter-spacing:.02em;line-height:1;margin-bottom:10px}
+
+.op{font-size:clamp(19px,2.1vw,34px);font-weight:700;line-height:1.15;margin-bottom:12px;
+  color:var(--text);display:flex;flex-wrap:wrap;gap:4px 14px}
+.op .name{white-space:nowrap}
+.op .name.ca1{color:var(--blue)}
+.op .name.ca2{color:var(--purple)}
+.op .name.hc{color:var(--green)}
+.op .name.soon{opacity:.55;font-style:italic}
+.op.none{color:var(--text3);font-weight:600;font-style:italic}
+
+.cur{margin-top:auto}
+.cur-pdo{font-size:clamp(22px,2.4vw,40px);font-weight:800;font-family:'Consolas',monospace;
+  line-height:1.05;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cur-pn{font-size:clamp(16px,1.5vw,26px);font-weight:600;color:var(--text2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.cur-idle{font-size:clamp(20px,2.2vw,34px);font-weight:800;color:var(--text3);letter-spacing:.12em}
+
+.next{margin-top:12px;border-top:1px dashed var(--border);padding-top:8px;
+  font-size:clamp(11px,.95vw,15px);color:var(--text3);font-family:'Consolas',monospace;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.next b{color:var(--text2);font-weight:700}
+
+.offline{margin:16px 22px;background:var(--red-bg);border:1px solid var(--red-dim);border-radius:16px;
+  padding:40px;text-align:center;color:var(--red);font-size:22px;font-weight:700}
+.offline small{display:block;color:var(--text3);font-weight:400;margin-top:8px;font-size:16px}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span class="title"><span class="dot"></span>STATIONS</span>
+  <div class="sp"></div>
+  <span class="clock" id="clock">--:--:--</span>
+</div>
+
+<div id="view"></div>
+
+<!-- Hidden loader: re-navigated every 15s to re-read the *_status.js files. -->
+<iframe id="loader" style="display:none" aria-hidden="true"></iframe>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────────
+// Both areas are always shown, stacked, in this order. Assembly is deliberately
+// not loaded — add 'AD' here and it appears as a third section automatically.
+const AREA_ORDER = ['PK','RP'];
+const AREA_LABEL = {PK:'PACKAGING', AD:'ASSEMBLY', RP:'RAW PART'};
+const STALE_SEC  = 90;                              // older than this = stale/offline
+const REFRESH_MS = 15000;                           // re-read snapshots off the share
+
+window.NPV_STATUS = {};
+
+function esc(s){
+  if(s===null||s===undefined) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function abbrevName(full){
+  const parts = String(full||'').trim().split(/\s+/).filter(Boolean);
+  if(parts.length<=1) return full||'';
+  return parts.slice(0,-1).map(p=>p[0].toUpperCase()+'.').join('')+parts[parts.length-1];
+}
+function humanAge(sec){
+  if(sec==null) return '';
+  if(sec<120) return sec+'s';
+  if(sec<7200) return Math.round(sec/60)+'m';
+  if(sec<172800) return Math.round(sec/3600)+'h';
+  return Math.round(sec/86400)+'d';
+}
+function shiftClass(sh){ return sh==='Ca 1'?'ca1':sh==='Ca 2'?'ca2':sh==='HC'?'hc':''; }
+
+// ── One area's station cards ─────────────────────────────────────────────────
+function renderCards(snap){
+  const roster={};
+  (snap.workers||[]).forEach(w=>{ roster[String(w.id)]=w; });
+
+  return (snap.stations||[]).map(sid=>{
+    const cell = (snap.board||{})[sid] || {};
+    const ip = cell.inprogress || null;
+    const t  = cell.timer || {};
+    const ops = (cell.workers||[]).map(id=>roster[String(id)] || {name:String(id),shift:'',active:true});
+    const q0 = (cell.queue||[])[0] || null;
+
+    const cls = ip ? (t.paused || ops.length===0 ? 'paused' : 'run') : 'idle';
+
+    const opHTML = ops.length
+      ? `<div class="op">` + ops.map(o=>
+          `<span class="name ${shiftClass(o.shift)}${o.active===false?' soon':''}">${esc(abbrevName(o.name))}</span>`
+        ).join('') + `</div>`
+      : `<div class="op none">— no operator —</div>`;
+
+    const curHTML = ip
+      ? `<div class="cur"><div class="cur-pdo">${esc(ip.id)}</div><div class="cur-pn">${esc(ip.part||ip.desc||'')}</div></div>`
+      : `<div class="cur"><div class="cur-idle">IDLE</div></div>`;
+
+    const nextHTML = q0
+      ? `<div class="next">NEXT — <b>${esc(q0.id)}</b>${(q0.part||q0.desc)?'  ·  '+esc(q0.part||q0.desc):''}</div>`
+      : `<div class="next">NEXT — —</div>`;
+
+    return `<div class="card ${cls}">
+      <div class="sid">${esc(sid)}</div>
+      ${opHTML}
+      ${curHTML}
+      ${nextHTML}
+    </div>`;
+  }).join('');
+}
+
+// ── One area's section: header + badge + grid (or an offline panel) ──────────
+function renderArea(code){
+  const snap = (window.NPV_STATUS||{})[code];
+  const label = esc(AREA_LABEL[code]||code);
+
+  if(!snap){
+    return `<div class="areahdr">
+        <span class="areaname"><span class="bar" style="background:var(--red)"></span>${label}</span>
+        <div class="sp"></div><span class="badge stale">NO DATA</span>
+      </div>
+      <div class="offline">⚠ ${label} — no status file
+        <small>this area's board isn't publishing to the share (or is in dev/test mode)</small></div>`;
+  }
+
+  const age = snap.__written ? Math.round((Date.now()-snap.__written)/1000) : null;
+  const stale = (age==null)||(age>STALE_SEC);
+  const nStations = (snap.stations||[]).length;
+  const nRunning = (snap.stations||[]).filter(sid=>((snap.board||{})[sid]||{}).inprogress).length;
+
+  return `<div class="areahdr">
+      <span class="areaname"><span class="bar" style="background:var(--${stale?'red':'green'})"></span>${label}</span>
+      <span class="areacount">${nRunning} / ${nStations} IN PROGRESS</span>
+      <div class="sp"></div>
+      <span class="badge ${stale?'stale':'ok'}">${stale?'STALE ':'LIVE '}${age!=null?humanAge(age):''}</span>
+    </div>
+    <div class="grid">${renderCards(snap)}</div>`;
+}
+
+function render(){
+  document.getElementById('view').innerHTML =
+    AREA_ORDER.map(code=>`<section class="area">${renderArea(code)}</section>`).join('');
+}
+
+// clock
+setInterval(()=>{ document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }, 1000);
+
+// ── Seamless refresh via a hidden iframe (no full-page reload = no flash) ─────
+const LOADER_BODY =
+  '<scr'+'ipt>window.NPV_STATUS={};</scr'+'ipt>'+
+  AREA_ORDER.map(c=>`<scr`+`ipt src="${c}_status.js" onerror="void 0"></scr`+`ipt>`).join('')+
+  '<scr'+'ipt>parent.postMessage({__npv:1,status:window.NPV_STATUS},"*");</scr'+'ipt>';
+
+function refreshData(){
+  document.getElementById('loader').srcdoc = '<!--'+Date.now()+'-->'+LOADER_BODY;
+}
+window.addEventListener('message', e=>{
+  if(e && e.data && e.data.__npv){
+    window.NPV_STATUS = e.data.status || {};
+    render();
+  }
+});
+
+render();
+refreshData();
+setInterval(refreshData, REFRESH_MS);
+</script>
+</body>
+</html>
