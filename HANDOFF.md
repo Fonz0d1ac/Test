@@ -171,6 +171,28 @@ must go through `sql_write()`.** Surfaced at startup, in `/api/board` `dev_mode`
 
 ---
 
+### 2k. Work-order prefixes + the OVERDUE scan grace (build `.11`)
+- **`WORK_ORDER_PREFIXES = ('PDO', 'SO-')`** (top of `app.py`) replaces the hardcoded
+  `startswith('PDO')` in `read_pdos()`. `PDO` stays hyphen-less so no order that used to
+  load can start being dropped; **`SO-` carries the hyphen deliberately** — bare `SO`
+  starts plenty of ordinary words and a cell like "SOMETHING" must not become a work
+  order. Matching is **case-insensitive**: a lowercase `so-1234` vanishing silently is far
+  worse than a stray match, which the area / qty>0 / ship-date checks drop anyway.
+  Nothing else hardcodes `PDO` — `parse_split_id()` verifies split children against
+  `splits_{AREA}.json` rather than matching a prefix, so `SO-123-A` already worked.
+- **`OVERDUE_GRACE_MIN = 20`** — the warehouse pulls and scans FG in ~20 min after the
+  operator actually finishes the box, so without a grace every on-time order flashes
+  OVERDUE for 20 minutes. Past ETC the countdown now **holds at `00:00`**; only after the
+  grace does it read **OVERDUE** and turn the station card **red** (`.scol.overdue`,
+  which overrides the green `.scol.active` border).
+  - Published in the board snapshot as **`overdue_grace_min`** so `board.html`, the wall
+    board and the shared viewers all read ONE number — change it in `app.py`, not in each
+    HTML file. The HTML files fall back to 20 only for an old snapshot.
+  - Only the **in-progress ETC** colours the station; `queue_clear` running long is a
+    different thing and must not turn a station red (`isDuration` guard in `startETC`).
+  - A **paused** timer (off-hours / no operator) is frozen, so it can never be overdue —
+    both `board.html` and `stations_only.html` check that before flagging.
+
 ## 3. Excel plan column map (`COL`, 0-based) and per-area state files
 `A`=pdo, `B`=part, `C`=raw_part, `D`=desc, `E`=qty, `F`=dest, `G`=pack_type (area filter + production
 type), `H`=receive_date, `I`=ship_date, `J`=ship_mode, `K`=week (sample flag), `L`=note, `M`=docs,

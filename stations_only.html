@@ -73,8 +73,11 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
 .card.run::before{background:var(--green)}
 .card.paused::before{background:var(--amber)}
 .card.idle::before{background:var(--border2)}
+.card.overdue::before{background:var(--red)}
 .card.run{border-color:var(--green-dim)}
 .card.paused{border-color:var(--amber-dim)}
+.card.overdue{border-color:var(--red);background:linear-gradient(180deg,rgba(255,93,93,.10),var(--panel))}
+.od{font-size:clamp(9px,.68vw,12px);font-weight:800;letter-spacing:.1em;color:var(--red);margin-bottom:1px}
 
 .sid{font-size:clamp(17px,1.35vw,25px);font-weight:800;font-family:'Consolas',monospace;
   letter-spacing:.02em;line-height:1;margin-bottom:5px}
@@ -150,6 +153,10 @@ function shiftClass(sh){ return sh==='Ca 1'?'ca1':sh==='Ca 2'?'ca2':sh==='HC'?'h
 function renderCards(snap){
   const roster={};
   (snap.workers||[]).forEach(w=>{ roster[String(w.id)]=w; });
+  // Grace between ETC and "overdue" — the warehouse scans FG in some minutes
+  // after the operator actually finishes. Published by app.py so this board and
+  // the control board never disagree; 20 is only a fallback for an old snapshot.
+  const graceMs = ((snap.overdue_grace_min!=null) ? snap.overdue_grace_min : 20) * 60000;
 
   return (snap.stations||[]).map(sid=>{
     const cell = (snap.board||{})[sid] || {};
@@ -158,7 +165,11 @@ function renderCards(snap){
     const ops = (cell.workers||[]).map(id=>roster[String(id)] || {name:String(id),shift:'',active:true});
     const q0 = (cell.queue||[])[0] || null;
 
-    const cls = ip ? (t.paused || ops.length===0 ? 'paused' : 'run') : 'idle';
+    // Paused means the estimate is frozen (off-hours / no operator), so it can't
+    // be late — only a running order can.
+    const overdue = !!(ip && t.etc && !t.paused &&
+                       (Date.now() - new Date(t.etc).getTime()) >= graceMs);
+    const cls = ip ? (overdue ? 'overdue' : (t.paused || ops.length===0 ? 'paused' : 'run')) : 'idle';
 
     const opHTML = ops.length
       ? `<div class="op">` + ops.map(o=>
@@ -166,8 +177,10 @@ function renderCards(snap){
         ).join('') + `</div>`
       : `<div class="op none">— no operator —</div>`;
 
+    // This board shows no countdown, so a red stripe alone would be ambiguous
+    // against the amber paused one — label it.
     const curHTML = ip
-      ? `<div class="cur"><div class="cur-pdo">${esc(ip.id)}</div><div class="cur-pn">${esc(ip.part||ip.desc||'')}</div></div>`
+      ? `<div class="cur">${overdue?'<div class="od">OVERDUE</div>':''}<div class="cur-pdo">${esc(ip.id)}</div><div class="cur-pn">${esc(ip.part||ip.desc||'')}</div></div>`
       : `<div class="cur"><div class="cur-idle">IDLE</div></div>`;
 
     const nextHTML = q0

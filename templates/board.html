@@ -459,6 +459,13 @@ tr.report-row-assigned .report-station-select{color:var(--green); border-color:v
 .risk-banner .risk-item{background:rgba(0,0,0,.25);border-radius:6px;padding:2px 8px;font-family:'IBM Plex Mono',monospace;
   font-weight:700;white-space:nowrap}
 .risk-banner .risk-item .rw{opacity:.8;font-weight:500;margin-left:5px}
+/* Past ETC + the scan grace: the running order really is late. Overrides the
+   green .scol.active border, so a staffed-but-late station reads red, not green. */
+.scol.overdue{border-color:var(--red,#ff5d5d)!important;
+  box-shadow:0 0 0 1px var(--red-dim,#7a2020) inset}
+.scol.overdue .shead{background:rgba(255,93,93,.15)}
+.scol.overdue .shead .sid{color:var(--red,#ff5d5d)}
+
 /* Station column pulses red while it holds an at-risk order */
 .scol.at-risk{border-radius:10px;animation:riskBorder 1.1s infinite}
 .scol.at-risk .shead .sid::after{content:' ⚠';color:var(--red,#ff5d5d)}
@@ -1983,9 +1990,24 @@ function updateBar() {
 function startETC(elId, iso, timerKey, isDuration) {
   const el=document.getElementById(elId);
   if(!el) return;
+  // Grace between hitting ETC and being called overdue: the operator finishes a
+  // box well before the warehouse pulls and scans it in as FG, so without this
+  // every on-time order flashes OVERDUE for ~20 minutes. Hold at 00:00 through
+  // the grace, then go red. Server-published so all views agree on the number.
+  const graceMs = ((BD && BD.overdue_grace_min != null) ? BD.overdue_grace_min : 20) * 60000;
+  const col = el.closest('.scol');           // null for the queue-clear element
   const tick=()=>{
     const d=new Date(iso)-new Date(), tm=Math.floor(d/60000);
-    if(d<=0){el.textContent='OVERDUE';el.className='etc-val urg'+(isDuration?' qc':'');return;}
+    if(d<=0){
+      const late = (-d) >= graceMs;
+      el.textContent = late ? 'OVERDUE' : '00:00';
+      el.className='etc-val urg'+(isDuration?' qc':'');
+      // Only the in-progress ETC colours the station — queue-clear running long
+      // is not the same thing as the running order being late.
+      if(col && !isDuration) col.classList.toggle('overdue', late);
+      return;
+    }
+    if(col && !isDuration) col.classList.remove('overdue');
     const h=Math.floor(tm/60),m=tm%60;
     el.textContent=h>0?`${h}h ${m}m`:`${m}m`;
     el.className='etc-val '+(isDuration?'qc':(tm<30?'urg':tm<120?'soon':'ok'));

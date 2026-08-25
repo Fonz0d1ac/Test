@@ -23,8 +23,8 @@ warnings.filterwarnings('ignore', module='openpyxl')
 # PCs are running the same version — instead of grepping the source or, worse,
 # discovering a stale PC only when a fixed bug reappears on one area. Format:
 # YYYY.MM.DD[.n] date-based; the trailing note is just a human label.
-BUILD_VERSION = '2026.07.30.10'
-BUILD_NOTE    = 'printing: BPT spools in the background (dialog no longer waits ~8s), persistent+prewarmed browser profile, lean headless flags'
+BUILD_VERSION = '2026.07.30.11'
+BUILD_NOTE    = 'accept SO- work orders alongside PDO; 20-min scan grace before an order counts as OVERDUE (station card turns red)'
 
 # ── Dev / test mode ─────────────────────────────────────────────────────────────
 # When ON, the board:
@@ -169,6 +169,25 @@ os.makedirs(DATA_DIR, exist_ok=True)
 # File paths — update these to match the actual machine
 EXCEL_PLAN = r"\\npvshare\Data\06_Operation\02.Production\02.Component\06. Planning\01. Plan follow up\Packaging_Plan_FollowUp_V01.xlsm"
 PLAN_SHEET = '1.FollowPlanForGL'
+
+# Which column-A values in the plan count as a work order. Anything else on the
+# row (notes, section headings) is skipped.
+#   'PDO'  — matched WITHOUT the hyphen, exactly as before, so this change can't
+#            start dropping an order that used to load.
+#   'SO-'  — matched WITH the hyphen deliberately: bare 'SO' starts plenty of
+#            ordinary words, and a stray cell like "SOMETHING" must not be read
+#            as a work order.
+# Add further prefixes here — nothing else hardcodes 'PDO'. parse_split_id()
+# verifies split children against splits_{AREA}.json instead of matching a
+# prefix, so 'SO-123-A' already works.
+WORK_ORDER_PREFIXES = ('PDO', 'SO-')
+
+# Grace period between an order hitting its ETC and being called OVERDUE. The
+# operator finishes a box well before the warehouse pulls and scans it in as FG,
+# so a station would otherwise flash overdue for ~20 minutes on every order that
+# is actually on time. During the grace the countdown holds at 00:00; after it,
+# the order is genuinely late and the station card turns red.
+OVERDUE_GRACE_MIN = 20
 DATA_START_ROW = 6
 
 # Dev mode: use uploaded files when real paths don't exist
@@ -693,7 +712,10 @@ def read_pdos():
             if not pdo_id:
                 break
             pdo_id = str(pdo_id)
-            if not pdo_id.startswith('PDO'):
+            # Case-insensitive on purpose: a lowercase 'so-1234' silently vanishing
+            # is a far worse failure than a stray match, which the area / qty>0 /
+            # ship-date checks below would drop anyway.
+            if not pdo_id.upper().startswith(WORK_ORDER_PREFIXES):
                 continue
             pack_type_val = str(row[COL['pack_type']] or '')
             if area_filter.lower() not in pack_type_val.lower():
@@ -2495,6 +2517,9 @@ def build_board_snapshot(area):
             'capacity_hours': _day_capacity_hours,
             'in_production': in_prod,
             'dev_mode':      DEV_MODE,
+            # Published so the board, the wall board and the shared viewers all
+            # use ONE number — change it here, not in each HTML file.
+            'overdue_grace_min': OVERDUE_GRACE_MIN,
             'ts':            datetime.now().strftime('%H:%M:%S'),
         }
 
