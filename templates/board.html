@@ -723,6 +723,12 @@ tr.report-row-assigned .report-station-select{color:var(--green); border-color:v
     <input id="ps-sumatra" placeholder="e.g. C:\tools\SumatraPDF.exe" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px;font-family:'IBM Plex Mono',monospace;font-size:12px">
     <label style="margin-top:8px">Pallet material prefixes <span style="color:var(--text3)">— comma separated; these are picked once per pallet, not per box</span></label>
     <input id="ps-palpfx" placeholder="PL, SPL" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px;font-family:'IBM Plex Mono',monospace;font-size:12px">
+    <label style="margin-top:10px">License Plate source</label>
+    <select id="ps-lpmode" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px">
+      <option value="dummy">Dummy — offline plate, nothing written to SQL (safe)</option>
+      <option value="live">LIVE — mint real plates and write [License Plate]</option>
+    </select>
+    <div id="ps-lpmode-state" style="font-size:11.5px;color:var(--text3);margin:4px 0 0 0;line-height:1.5"></div>
     <label style="margin-top:8px">MainDatabase.xlsx path</label>
     <input id="ps-maindb" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px;font-family:'IBM Plex Mono',monospace;font-size:12px">
     <label style="margin-top:8px">New-part email recipients (one per line, or ; / , separated)</label>
@@ -1264,8 +1270,16 @@ function showPrintResult(d, station) {
   bn.className = 'pr-banner ' + cls;
   bn.textContent = head + ' · ' + `queued on ${station} (${d.placed === 'inprogress' ? 'in progress' : 'queue'})`;
 
-  document.getElementById('pr-meta').textContent =
-    `${d.pdo_id}  ·  ${d.part || ''}  ·  ${d.po_qty || 0} pcs`;
+  document.getElementById('pr-meta').innerHTML =
+    `${esc(d.pdo_id)}  ·  ${esc(d.part || '')}  ·  ${d.po_qty || 0} pcs` +
+    // Which plates are on these boxes is the one thing nobody can tell by
+    // looking at the label — a dummy and a real plate are the same 18 characters.
+    // Say it on every print, not just when something went wrong.
+    (boxes.length
+      ? (d.lp_mode === 'live'
+          ? `<br><span style="color:var(--green)">License plates: LIVE — ${d.lp_written || 0} row(s) written to [License Plate]</span>`
+          : `<br><span style="color:var(--amber)">License plates: DUMMY — not recorded in SQL, do not ship these boxes</span>`)
+      : '');
 
   // The packing standard drives the whole split, so show what it resolved to.
   const stdEl = document.getElementById('pr-std');
@@ -1373,8 +1387,21 @@ async function openPrintSettings() {
     document.getElementById('ps-silent').checked = s.silent_bpt !== false;
     document.getElementById('ps-sumatra').value = s.sumatra_path || '';
     document.getElementById('ps-palpfx').value = (s.pallet_prefixes || []).join(', ');
+    renderLpModeState(s.lp_mode);
   } catch (e) {}
   if (!win) msg.textContent = 'Note: no Windows printers detected on this host (pywin32). Names still save; actual printing runs on the board PC.';
+}
+// Switching to live starts consuming serials off a table three areas and the
+// Excel macros share, so the consequence is spelled out next to the control
+// rather than left in a handoff document nobody has open at the printer.
+function renderLpModeState(mode) {
+  const live = (mode || 'dummy') === 'live';
+  document.getElementById('ps-lpmode').value = live ? 'live' : 'dummy';
+  document.getElementById('ps-lpmode-state').innerHTML = live
+    ? '<span style="color:var(--green)">✓ LIVE — every box label mints a real plate and writes a row. ' +
+      'The Excel macro mints off the same counter; both are safe together.</span>'
+    : '<span style="color:var(--amber)">⚠ DUMMY — labels print with a realistic plate that exists nowhere in SQL. ' +
+      'Fine for testing; boxes printed this way must not be shipped or scanned.</span>';
 }
 function closePrintSettings() { document.getElementById('ov-psettings').classList.remove('show'); }
 async function savePrintSettings() {
@@ -1387,10 +1414,24 @@ async function savePrintSettings() {
     silent_bpt: document.getElementById('ps-silent').checked,
     sumatra_path: document.getElementById('ps-sumatra').value.trim(),
     pallet_prefixes: document.getElementById('ps-palpfx').value,
+    lp_mode: document.getElementById('ps-lpmode').value,
   };
+  if (body.lp_mode === 'live' &&
+      !confirm('Switch License Plates to LIVE?\n\nEvery box label from now on will mint a real ' +
+               'plate and write a row into [License Plate]. This is shared with the other two areas ' +
+               'and with the Excel macro, and it cannot be undone per-label.')) {
+    document.getElementById('ps-lpmode').value = 'dummy';
+    body.lp_mode = 'dummy';
+  }
   try {
     const r = await fetch('/api/print_settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    if (r.ok) { msg.textContent = 'Saved ✓'; toast('Print settings saved', 'ok'); }
+    if (r.ok) {
+      msg.textContent = 'Saved ✓'; toast('Print settings saved', 'ok');
+      // Re-read rather than assume: if the confirm above was cancelled, or the
+      // server normalised a value, the caption must show what was actually saved.
+      const j = await r.json().catch(() => null);
+      if (j && j.settings) renderLpModeState(j.settings.lp_mode);
+    }
     else msg.textContent = 'Save failed';
   } catch (e) { msg.textContent = 'Network error'; }
 }

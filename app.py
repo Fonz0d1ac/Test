@@ -23,8 +23,8 @@ warnings.filterwarnings('ignore', module='openpyxl')
 # PCs are running the same version — instead of grepping the source or, worse,
 # discovering a stale PC only when a fixed bug reappears on one area. Format:
 # YYYY.MM.DD[.n] date-based; the trailing note is just a human label.
-BUILD_VERSION = '2026.07.30.11'
-BUILD_NOTE    = 'accept SO- work orders alongside PDO; 20-min scan grace before an order counts as OVERDUE (station card turns red)'
+BUILD_VERSION = '2026.08.25.12'
+BUILD_NOTE    = 'real License Plate mint (lp.py): reuse-then-mint under sp_getapplock, [License Plate] INSERT committed before printing, per-area serial ranges, live/dummy switch in print settings (defaults to dummy)'
 
 # ── Dev / test mode ─────────────────────────────────────────────────────────────
 # When ON, the board:
@@ -3486,6 +3486,17 @@ def _print_settings_defaults():
         'silent_bpt': True,
         'sumatra_path': '',
         'browser_path': '',
+        # License Plate source. 'dummy' = the offline plate (correct shape and
+        # area range, never written to SQL); 'live' = the real reuse-then-mint
+        # in lp.py plus the [License Plate] INSERT.
+        #
+        # Defaults to 'dummy' ON PURPOSE, per area. Switching a board to live is
+        # the moment printing starts consuming real serials off a table three
+        # areas and the Excel macros share, so it is a deliberate act by whoever
+        # is standing at that PC during an agreed window — not something a
+        # `git pull` does to all three areas at once. Dev mode overrides this to
+        # dummy regardless (safety guard #17).
+        'lp_mode': 'dummy',
         # Packaging materials charged per PALLET rather than per box, by code
         # prefix. Kept as settings so a new prefix is a config change, not a
         # code change (the business chose prefixes over a packaging_type table).
@@ -3653,6 +3664,11 @@ def api_print_settings():
             s[k] = d[k].strip()
     if 'silent_bpt' in d:
         s['silent_bpt'] = bool(d['silent_bpt'])
+    if 'lp_mode' in d:
+        # Anything that isn't exactly 'live' means dummy. A typo must fail safe
+        # towards NOT touching the production serial sequence.
+        s['lp_mode'] = 'live' if str(d['lp_mode']).strip().lower() == 'live' else 'dummy'
+        print(f"[lp] License Plate mode for {AREA} set to {s['lp_mode'].upper()}")
     for k in ('pallet_prefixes', 'crate_prefixes'):
         if k in d:
             v = d[k]
@@ -3679,6 +3695,161 @@ def _safe_warm_maindb():
         get_maindb()
     except Exception as e:
         print(f'[MainDatabase] re-warm after settings save failed: {e}')
+
+# ── License Plate: real mint + audit INSERT (HANDOFF §5) ───────────────────────
+# The print action is the ONLY place the board mints. lp.py owns the SQL; these
+# two helpers own the policy: when we are allowed to mint at all, and what
+# happens to the board's own caches once we have.
+
+def _lp_user_device():
+    """The macro's tg_user / tg_dev: Windows username and machine name.
+
+    HANDOFF §5.7 Q1 left this unanswered. Both are audit-only columns — nothing
+    joins on them — so an educated reading is safe to ship: they are what any
+    per-PC audit trail records, and the board PCs are exactly one per area, which
+    is what makes Device_ID worth having at all. If the real macro means
+    something else, these are the two values to change and nothing else moves."""
+    import getpass, platform
+    try:
+        user = getpass.getuser()
+    except Exception:
+        user = os.environ.get('USERNAME') or ''
+    try:
+        device = platform.node()
+    except Exception:
+        device = os.environ.get('COMPUTERNAME') or ''
+    return str(user)[:50], str(device)[:50]
+
+
+def _lp_prepare(n, *, po, pii, vendor, log=print):
+    """Get n License Plates for a print run, and say plainly where they came from.
+
+    Returns (plates, mode, conn, error):
+      • mode 'live'  — real plates, `conn` is an OPEN connection still holding the
+        transaction the caller must use for the audit INSERT and then commit.
+      • mode 'dummy' — offline plates in this AREA's range, `conn` is None,
+        nothing is inserted, nothing must be inserted.
+      • error non-empty — nothing was minted and nothing may be printed.
+
+    Four separate reasons to stay on dummy plates, each logged distinctly,
+    because "why did this print a dummy plate" is the first question anyone will
+    ask at the printer:
+
+      1. DEV_MODE. Safety guard #17, and the subtle one. The mint is a SELECT, so
+         sql_write() does NOT gate it — a dev run left to itself would consume
+         real serials off the live sequence and then skip the INSERT that records
+         them, silently corrupting the counter for the real areas. Dev mode has
+         to short-circuit BEFORE the mint, not at the write.
+      2. lp_mode is not 'live' — this board has not been switched on yet.
+      3. No pyodbc on this PC.
+      4. The mint or the connection failed. This one is an ERROR, not a
+         fallback: a dummy plate silently substituted into a live run would put
+         an unrecorded plate on a real box.
+    """
+    settings = load_print_settings()
+    vendor6 = str(vendor or '')[:6]
+    def _dummy(reason):
+        log(f'[lp] DUMMY plates ({n}) — {reason}')
+        import boxlabel as _bl
+        return _bl.dummy_plates_for(AREA, vendor6, n), 'dummy', None, ''
+
+    if n <= 0:
+        return [], 'dummy', None, ''
+    if DEV_MODE:
+        return _dummy('dev/test mode is ON, so the mint is skipped entirely — '
+                      'it is a SELECT and would consume real serials')
+    if str(settings.get('lp_mode', 'dummy')).lower() != 'live':
+        return _dummy(f'License Plate mode for {AREA} is DUMMY '
+                      f'(turn it on in 🖨 Print settings when this area goes live)')
+    if not PYODBC_AVAILABLE:
+        return _dummy('pyodbc is not installed on this PC')
+
+    conn = None
+    try:
+        import lp as _lp
+        conn = pyodbc.connect(SQL_CONN_PROD, timeout=15)
+        conn.autocommit = False      # mint + INSERT commit together, before printing
+        r = _lp.acquire_plates(conn, area=AREA, po=po, pii_po=pii, n=n,
+                               vendor_code=vendor6, log=log)
+        return r['plates'], 'live', conn, ''
+    except Exception as e:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+        log(f'[lp] mint FAILED for {po}: {e}')
+        return [], 'live', None, f'License Plate mint failed: {e}'
+
+
+def _lp_commit_and_seed(conn, rows, plates, po, sql_station, log=print):
+    """INSERT the audit rows, commit, verify, then seed the board's own caches.
+
+    Insert-then-print (HANDOFF §5.4 #2): the macro printed first, so a printer
+    exception consumed a serial that was never recorded and the next run minted
+    the same plate onto a second physical label. Committing first makes the worst
+    case an orphan row and a gap in the sequence — never a duplicate plate.
+
+    The cache seeding is the race called out in HANDOFF §7. _record_lp_suppression()
+    reads _license_plate_cache, which until now only the 60s poll ever populated.
+    Once app.py is itself the LP writer, a GL removing a just-printed order would
+    find no cache entry, record no suppression, and watch the next poll put the
+    order straight back on the board. Seeding here — in the same place as the
+    INSERT — closes that window, and makes the green `has_lp` badge appear at once
+    instead of up to 60 seconds later.
+
+    Returns (written, error). A non-empty error means DO NOT PRINT.
+    """
+    import lp as _lp
+    try:
+        written = _lp.insert_plate_rows(conn, rows, sql_write=sql_write, log=log)
+        if rows and not written:
+            # sql_write() dry-ran every row, i.e. DEV_MODE. _lp_prepare() should
+            # already have short-circuited to dummy plates long before here, so
+            # reaching this line means the gate was reordered. Refuse rather than
+            # print plates that were minted off the live sequence and never
+            # recorded — and do NOT fall through to verify_inserted(), which
+            # would report the far more confusing "plate is missing".
+            raise _lp.LPError('dev/test mode dry-ran the [License Plate] INSERT, '
+                              'but the plates were minted for real. The dev-mode '
+                              'check in _lp_prepare() must run BEFORE the mint '
+                              '(safety guard #17).')
+        conn.commit()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return 0, f'License Plate INSERT failed: {e}'
+    try:
+        # Past the commit: the rows ARE in the table. A verification failure means
+        # somebody else wrote a colliding plate anyway, so we refuse to print and
+        # the serials become an unused gap — which is exactly the failure mode
+        # chosen in §5.4, and infinitely better than two boxes carrying one plate.
+        _lp.verify_inserted(conn, plates, log=log)
+    except Exception as e:
+        return 0, (f'{e} The rows were committed, so these serials are spent — '
+                   f'nothing was printed.')
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    with _cache_lock:
+        _license_plate_cache[str(po).strip()] = (str(sql_station).strip().upper(),
+                                                 datetime.now())
+    log(f'[lp] {written} row(s) committed to [License Plate] for {po} '
+        f'→ {", ".join(plates)}')
+    return written, ''
+
 
 @app.route('/api/issue_ticket', methods=['POST'])
 def api_issue_ticket():
@@ -3738,11 +3909,47 @@ def api_issue_ticket():
 
         lps = []
         boxes = []          # per-box outcome, shown in the confirmation dialog
+        lp_mode = 'dummy'   # where the plates came from — reported to the dialog
+        lp_written = 0
         _zpl_secs = 0.0
         if do_box:
-            r = _bl.build_box_labels(mdb, po=po, part=part, po_qty=qty, dest=dest,
-                                     station=station, pii=pii, desc=desc,
-                                     vendor_code=vendor, production_type=prod_type)
+            # Order matters and is the whole design: COUNT the boxes, MINT that
+            # many plates, BUILD the labels around them, COMMIT the audit rows,
+            # and only THEN print. box_count() uses the same resolved packing
+            # standard the BPT does (guard #16), so the mint can never be sized
+            # differently from the labels that get built.
+            _lp_err = ''
+            _lp_conn = None
+            _lp0 = _t.time()
+            n_boxes = _bl.box_count(std, qty)
+            plates, lp_mode, _lp_conn, _lp_err = _lp_prepare(
+                n_boxes, po=po, pii=pii, vendor=vendor)
+            sql_station = normalize_station_sql(station)
+            _lp_user, _lp_device = _lp_user_device()
+            r = ({'ok': False, 'error': _lp_err} if _lp_err else
+                 _bl.build_box_labels(mdb, po=po, part=part, po_qty=qty, dest=dest,
+                                      station=station, pii=pii, desc=desc,
+                                      vendor_code=vendor, production_type=prod_type,
+                                      area=AREA, plates=plates, sql_station=sql_station,
+                                      user=_lp_user, device=_lp_device))
+            if r.get('ok') and _lp_conn is not None:
+                # Committed BEFORE the first label leaves the printer (§5.4 #2).
+                lp_written, _lp_err = _lp_commit_and_seed(
+                    _lp_conn, [L['sql_row'] for L in r['labels']],
+                    [L['lp'] for L in r['labels']], po, sql_station)
+                if _lp_err:
+                    r = {'ok': False, 'error': _lp_err}
+            elif _lp_conn is not None:
+                # The build failed after we minted. Nothing is printed and nothing
+                # is recorded — the plates are simply never used. A gap, not a
+                # duplicate, which is the failure mode we chose.
+                try:
+                    _lp_conn.rollback(); _lp_conn.close()
+                except Exception:
+                    pass
+            # Mint + INSERT is SQL on the operator's wait, so it is measured
+            # like every other stage rather than assumed cheap (§13.4).
+            timings['lp'] = round(_t.time() - _lp0, 2)
             if not r.get('ok'):
                 warnings.append(f"Box label skipped: {r.get('error')}")
             else:
@@ -3767,7 +3974,8 @@ def api_issue_ticket():
                         warnings.append(f"Zebra box {L['box_no']}: {err}")
                     boxes.append({'box_no': L['box_no'], 'qty': L['box_qty'],
                                   'lp': L['lp'], 'printed': ok, 'error': err})
-                    # DUMMY LP → no [License Plate] INSERT yet (SQL phase).
+                    # No INSERT here: the whole run's audit rows were committed
+                    # above, before any of this printed.
 
         _b = _lap('zebra', _m)
         timings['zebra_render'] = round(_zpl_secs, 2)   # of which: ZPL generation
@@ -3815,6 +4023,7 @@ def api_issue_ticket():
 
         return jsonify({'ok': True, 'lps': lps, 'boxes': boxes, 'std': std_info,
                         'timings': timings,
+                        'lp_mode': lp_mode, 'lp_written': lp_written,
                         'bpt_token': bpt_token, 'bpt_pages': bpt_pages,
                         'bpt_printed': bpt_printed, 'bpt_detail': bpt_detail,
                         'bpt_job': bpt_job,

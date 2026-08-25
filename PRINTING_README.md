@@ -55,9 +55,24 @@ Get it from https://www.sumatrapdfreader.org → "Portable version".
 If either piece is missing, printing still works: the BPT opens in a tab as before and
 the result dialog says why. **🖨 Print** shows a live ✓/⚠ readiness line.
 
-> **License Plate is a DUMMY right now** (`V-<vendor6><yymmdd><serial-from-200001>`).
-> No `[License Plate]` INSERT and no email are sent yet — those are the next
-> (SQL) phase. Revision on the box label is intentionally blank.
+> ## ⚠ License Plates: DUMMY until you switch this area to LIVE
+>
+> Every board ships with **🖨 Print settings → License Plate source = Dummy**. Labels
+> print with a realistic plate (`<vendor6><yymmdd><serial>`, in the correct area range)
+> that **exists nowhere in SQL**. Nothing is inserted, no serial is consumed. That is the
+> right setting for testing printers, and it survives `git pull`, a rebuilt PC, and dev mode.
+>
+> **Boxes printed with a dummy plate must not be shipped or scanned.**
+>
+> Switching the dropdown to **LIVE** (there is a confirm) turns on the real mint: the plate is
+> either reused from the PDO's `PII_PO` family or minted `max-serial+1`, and a row is committed
+> to `[dbo].[License Plate]` **before the label prints**. The print-result dialog says LIVE or
+> DUMMY on every single run, because the label itself cannot tell you — both are 18 characters.
+>
+> Do it **one area at a time**, with a single-box test PDO, and read the row back in SQL before
+> flipping the next one. Dev/test mode forces DUMMY regardless of this setting.
+>
+> Revision on the box label is still intentionally blank.
 
 ## Install (on the Windows board PC)
 ```
@@ -71,7 +86,8 @@ pip install -r requirements-print.txt
 | `app.py` | board + the new endpoints (`/api/issue_ticket`, `/api/print_settings`, `/api/printers`, `/bpt/<token>`) |
 | `templates/board.html` | 🖨 button on each PDO card + Issue modal + **🖨 Print** settings modal (top bar) |
 | `bpt.py` | BPT ticket engine + A5 HTML renderer (reads MainDatabase) |
-| `boxlabel.py` | box-label engine (per-box qty, stack/GW, **dummy LP**) |
+| `boxlabel.py` | box-label engine (per-box qty, stack/GW, box count, audit row) |
+| `lp.py` | **License Plate reuse-then-mint + `[License Plate]` INSERT** (`sp_getapplock`, insert-before-print) |
 | `label_print.py` | Zebra ZPL renderer (raster → rotated ZPL) |
 | `printing.py` | win32 helpers (list printers, send raw ZPL) |
 
@@ -85,6 +101,9 @@ pip install -r requirements-print.txt
 - **Pallet material prefixes** — codes picked once per pallet instead of per box.
   Default `PL, SPL`. **If your pallet/slip-sheet codes start with something else, set it
   here** — otherwise they'll be charged to every box.
+- **License Plate source** — `Dummy` (default, safe) or `LIVE`. See the box above. Per area;
+  switching to LIVE asks for confirmation because it starts consuming real serials off a table
+  shared with the other two areas and with the Excel macros.
 - **MainDatabase.xlsx path** — defaults to the `\\npvshare\…\MainDatabase.xlsx`
   share; point it at a local copy for testing if needed.
 - **Email recipients** — stored for the new-part email (not sent yet).
@@ -140,9 +159,9 @@ The app warms it at startup and again when you open the Issue modal, so in pract
 cost lands while the operator is still typing the station.
 
 ## Not done yet (next phase)
-- Real **License Plate mint** (reuse `Nhaplecuoingay_All`, else `max-serial+1` in a
-  SQL transaction) + the `[dbo].[License Plate]` INSERT (the audit row is already
-  assembled in `boxlabel.py` as `sql_row`, ready to route through `sql_write()`).
+- The **first live mint has never run.** The code is there (`lp.py`) and defaults to off; the
+  three SQL statements have never executed against the real server, so expect the first LIVE
+  print to be where a verbally-given column name surfaces. It fails loudly and *before* printing.
 - **New-part email** (recipients are stored; sending is TODO).
 - **Wooden-crate dual routing** — a `WC` material should print the BPT to BOTH
   Canon01 and tanglung. The silent path makes this possible (the browser dialog

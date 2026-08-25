@@ -1,13 +1,13 @@
 # Production Control System — Full Handoff
 
 **Repo:** `Fonz0d1ac/Test` · **Branch:** `claude/production-control-board-157ift`
-**Build:** `2026.07.30.11` (`BUILD_VERSION` / `BUILD_NOTE` at the top of `app.py`, shown in the
+**Build:** `2026.08.25.12` (`BUILD_VERSION` / `BUILD_NOTE` at the top of `app.py`, shown in the
 setup window and the first console line)
 **Site:** NPV (Northstar Precision Vietnam) — Packaging / Assembly / Raw Part
 
 > **PUSH WORKS.** It was 403 for two whole sessions and the old handoff told you to hand files
 > over in chat instead — **that is no longer true and must not be repeated.** Everything is on
-> GitHub: 18 files, full history. Commit and push normally. If a push ever 403s again, it is a
+> GitHub: 19 files, full history. Commit and push normally. If a push ever 403s again, it is a
 > repo-write permission on the Claude GitHub App, not a code problem.
 
 ---
@@ -50,7 +50,7 @@ cost someone real production state.
  ┌──────────────────────── app.py (Control Board, 1 per area, Windows) ─────────────────────────┐
  │ plan→PDO list · SQL FG/WIP/License-Plate poll (60s) · attendance→live roster · state→data/*   │
  │ serves board.html :5050 · writes {AREA}_status.{json,js} every 5s to the share                │
- │ printing: BPT pick ticket (Canon, silent) + Zebra box label (raw ZPL) + queue-on-station      │
+ │ printing: BPT pick ticket (Canon, silent) + Zebra box label (raw ZPL + LP mint) + queue-on-stn │
  └───────────────────────────────────────────────────────────────────────────────────────────────┘
                           │ shared folder: \\npvshare\...\dashboard_status\                 │
         {PK,AD,RP}_status.{json,js}  +  aheadbehind_status.js (written by combined_dashboard)│
@@ -86,7 +86,8 @@ shared_aheadbehind.html       Firewall-free Ahead/Behind (Chart.js INLINED)
 shared_rotator.html           Firewall-free rotator
 stations_only.html            PK+RP wall board, fits 1920×1080 without scrolling
 bpt.py                        BPT pick-ticket engine + MainDatabase reader + A5 HTML render
-boxlabel.py                   Zebra box-label engine (ModeQty formulas, DUMMY LP, stack/GW math)
+boxlabel.py                   Zebra box-label engine (ModeQty formulas, box split, stack/GW math)
+lp.py                         License Plate reuse-then-mint + [License Plate] audit INSERT
 label_print.py                ZPL renderer (raster → compressed ^GF) — 95% embedded logo data
 printing.py                   win32 + silent-print helpers (lazy imports)
 requirements-print.txt        openpyxl · pillow · python-barcode · pywin32(win)
@@ -176,8 +177,11 @@ a prefix, which is why `SO-123-A` worked with no change (§2k).
 label)`** logs `[dev-mode] SQL write SKIPPED …` instead of executing. **All board-originated
 INSERT/UPDATE/DELETE must go through `sql_write()`.** Surfaced at startup, in `/api/board.dev_mode`,
 and as a banner in `board.html`.
-⚠ Printing is **not** gated by dev mode (it is not a SQL write, and the LP is currently a dummy).
-When the real mint lands this becomes a trap — see §6.17.
+⚠ Printing itself is **not** gated by dev mode — paper still comes out, because being able to
+test on the real printers is the point. What IS gated is the License Plate: `_lp_prepare()` checks
+`DEV_MODE` **before any SQL** and hands back dummy plates. That ordering is load-bearing, not
+stylistic — the mint is a `SELECT`, so `sql_write()` cannot protect it, and a dev run that minted
+would consume real serials while skipping the INSERT that records them. See guard #17.
 
 ### 2k. Work-order prefixes + the OVERDUE scan grace (build `.11`)
 **`WORK_ORDER_PREFIXES = ('PDO', 'SO-')`** replaces the hardcoded `startswith('PDO')` in
@@ -270,8 +274,11 @@ Validated: `1029887-329`/`TRICAP` → WI K20, qty/box 48, dest TRI, 7 materials.
 `build_box_labels(...)` ports the macro formulas verbatim: `QtyLblPrint = RoundUp(POQty/QtyPerBoxSTD)`;
 per-box qty (last = remainder); stack limit (B9) / pallet GW (B12) with the partial-vs-full
 last-pallet branches and the ModeStandard-off branch. Weights from MainDatabase (R/S/T/U/V/W).
-Returns one label dict per box plus an assembled `sql_row` in the macro's exact INSERT column order.
-**License Plate is still a DUMMY** and revision is blank — see §5.
+Returns one label dict per box plus an assembled `sql_row` in the macro's exact INSERT column order
+— and those dict **keys ARE the `[License Plate]` column names**, because `lp.insert_plate_rows`
+builds its statement from them. Plates come in via `plates=` from `lp.acquire_plates` (§5); with no
+`plates=` it falls back to area-correct dummies. `box_count(std, po_qty)` answers "how many boxes"
+without building anything, so the caller can size the mint first. Revision is still blank — see §5.
 
 ### 4d. Packing standard = the single source of the box split (build `.8`)
 **`bpt.resolve_pack_std(mdb, fg, bucket)` is the ONE resolver** for qty/box + box/pallet, used by
@@ -342,16 +349,20 @@ Net in-sandbox: 11 labels 2.88 s → 0.46 s to generate, 8.4× less data on the 
 - Endpoints: **`/api/printers`** · **`/api/print_settings`** GET/POST · **`/api/issue_ticket`** POST
   · **`/api/print_job/<id>`** · **`/api/prewarm_print`** POST · **`/bpt/<token>`** GET.
 - **`/api/issue_ticket`** resolves the PDO from `_pdo_cache`, opens MainDatabase, resolves the
-  packing standard once, builds the BPT + box labels, prints the Zebra labels (RAW ZPL), starts the
+  packing standard once, **counts the boxes → mints that many License Plates → builds the labels
+  around them → commits the `[License Plate]` rows → and only then prints** (§5.6), starts the
   background Canon job, and **`_issue_place_pdo(pdo_id, station)`** places the PDO on the station
-  (in-progress if free, else queue). Returns `{ok, lps, boxes[], std, bpt_token, bpt_pages,
-  bpt_job, placed, timings, warnings}`.
+  (in-progress if free, else queue). Returns `{ok, lps, boxes[], std, lp_mode, lp_written,
+  bpt_token, bpt_pages, bpt_job, placed, timings, warnings}`. `timings` gained an **`lp`** stage —
+  the mint is SQL on the operator's wait, so it is measured, not assumed cheap.
 - **UI:** a **🖨 button on each PDO card** → Issue modal; a top-bar **🖨 Print** → settings modal
   (Zebra + Canon printer, silent toggle + live readiness line, SumatraPDF path, pallet prefixes,
-  MainDatabase path, email recipients).
+  **License Plate source: dummy/LIVE**, MainDatabase path, email recipients).
 - **Print-result dialog (`ov-printres`) — BLOCKING.** Every issue ends here: resolved packing
   standard (market, qty/box, box/pallet → box + pallet counts), BPT page count and where it went,
-  a per-box table (box, qty, License Plate, ✓/✕ with the error), and warnings. `.ov` overlays in
+  a per-box table (box, qty, License Plate, ✓/✕ with the error), warnings, and — on every run —
+  **whether the plates were LIVE or DUMMY**, because the label itself cannot tell you: both are the
+  same 18 characters. `.ov` overlays in
   `board.html` already ignore backdrop/Esc, so **OK is the only exit**; `forceLoad()` runs on OK,
   not before, so the board cannot shift under the operator while they read.
   ⚠ **`bpt_printed` is False whenever a job is running** — the tab fallback must also check
@@ -361,10 +372,12 @@ Net in-sandbox: 11 labels 2.88 s → 0.46 s to generate, 8.4× less data on the 
 
 ---
 
-## 5. NEXT PHASE — real License Plate mint + SQL insert
+## 5. License Plate mint — BUILT (build `.12`), ships defaulting to DUMMY
 
-Everything below is analysed and agreed in principle but **not written**. The dummy LP and the
-assembled `sql_row` are the seams.
+`lp.py` is the real reuse-then-mint plus the `[License Plate]` audit INSERT. It is wired into the
+print action and **off by default on every board**: `print_settings_{AREA}.json` carries
+`lp_mode` (`'dummy'` | `'live'`), default `'dummy'`, flipped per area in **🖨 Print settings →
+License Plate source** behind a confirm. Nothing about a `git pull` turns minting on.
 
 ### 5.1 LP format (verified against production data)
 ```
@@ -382,15 +395,17 @@ three areas share one `[License Plate]` table. The counter is **per (area, day),
 vendors**. The SQL anchors from the right (`len-11`, `len-5`, `right(...,5)`), so a vendor code
 shorter than 6 chars still parses.
 
-⚠ **`boxlabel.make_dummy_lp` hardcodes `200000 + i`** — Packaging. It must become area-driven or
-AD and RP will mint into PK's range.
+`lp.AREA_SERIAL` is the **only** place an area appears in the whole mint. `boxlabel.make_dummy_lp`
+used to hardcode `200000 + i` — Packaging's base — so an AD or RP *test* print produced a plate
+whose first serial digit lied about which area it came from. It now delegates to `lp.dummy_plates`
+and is area-driven like everything else.
 
 ### 5.2 The three area macros are otherwise identical
 Byte-identical stack/GW formulas, `UsedLP` accumulation, reuse query, INSERT columns, and the
 small-box logic incl. the `1024884-329` hardcode. **The only functional difference is the serial
 digit.** One cosmetic difference: RP's small-box label sets `A1 = station` while AD/PK set
 `A1 = station & "-ThungNho"` — all three still write the `-ThungNho` suffix to SQL. Looks like an
-RP oversight; do not copy it.
+RP oversight; do not copy it. (Small-box is still out of scope — §5.7.)
 
 ### 5.3 Reuse-before-mint — why it exists
 At month-end, planning splits an in-progress PDO (`PDO-0001` 75/100 → `PDO-0001` closed + `PDO-0002`
@@ -398,23 +413,32 @@ continues). Whatever partial quantity was logged against the OLD PDO must keep t
 the efficiency calculation — which joins on LP — loses that WIP. `PII_PO` is the family ID that
 survives the split (assigned upstream in the MRP/D365 import, not in any macro here).
 
+`lp.find_reusable_plates()` does it in **one** query instead of the macro's N:
 ```sql
-SELECT TOP 1 [License Plate] FROM [Nhaplecuoingay_All] a
-WHERE PII_PO = ? AND PO <> ?
-  AND NOT EXISTS (SELECT 1 FROM [FG_Database_All] b WHERE a.[License Plate] = b.[License Plate])
-  <UsedLP exclusions>
-GROUP BY [License Plate]
+SELECT TOP (?) a.[License Plate] FROM [dbo].[Nhaplecuoingay_All] a
+WHERE a.PII_PO = ? AND a.PO <> ?
+  AND NOT EXISTS (SELECT 1 FROM [dbo].[FG_Database_All] b
+                  WHERE b.[License Plate] = a.[License Plate])
+GROUP BY a.[License Plate]
+ORDER BY MAX(a.[Production date]) DESC
 ```
-The macro runs this **per label**, accumulating `UsedLP`, so an 11-box PDO can reuse up to 11
-orphaned plates.
+`TOP (n)` in one shot makes the **within-run exclusion structural** — a plate is returned once, so
+it cannot land on two boxes — which replaces the macro's `UsedLP` string entirely.
 
-### 5.4 Two macro bugs NOT to port
-1. **Reuse has no `ORDER BY`** — confirmed live: **113 `PII_PO` groups with 2+ simultaneously
-   eligible plates**, so SQL Server's pick is arbitrary. Fix: `ORDER BY MAX([Production date]) DESC`
-   (the `GROUP BY` forces the aggregate).
-2. **Print-then-insert.** If printing throws, the serial is consumed but never recorded, so the next
-   run re-mints the same plate onto a physical label. **Flip to mint+insert committed, then print** —
-   worst case becomes an orphan row and a gap, not a duplicate plate.
+⚠ **New guard the macro never needed: a blank `PII_PO` skips the reuse pass.** The macro ran off a
+sheet where PII was always populated; the board serves orders straight from the plan Excel, where
+column Q can be empty — and `PII_PO = ''` would match every other blank-PII row in the table and
+hand this PDO a pile of unrelated plates.
+
+### 5.4 Two macro bugs deliberately NOT ported
+1. **Reuse had no `ORDER BY`** — confirmed live: **113 `PII_PO` groups with 2+ simultaneously
+   eligible plates**, so SQL Server's pick was arbitrary. We take `ORDER BY MAX([Production date])
+   DESC`. ⚠ This means that in those 113 groups **we deliberately pick a different plate than the
+   macro would have.** That was the point, and it is the one behavioural deviation a reviewer
+   should be told about explicitly.
+2. **Print-then-insert.** If printing threw, the serial was consumed but never recorded, so the
+   next run re-minted the same plate onto a physical label. We **mint + INSERT + commit + verify,
+   then print**. Worst case is an orphan row and a gap in the sequence — never a duplicate plate.
 
 ### 5.5 Why NOT the `area_counters` design from `License_Plate_Logic_Handoff.md`
 That doc proposes MySQL with new tables (`license_plates`, `license_plate_events`, `area_counters`).
@@ -425,40 +449,71 @@ in both directions. `MAX+1` also self-heals against unknown writers, which matte
 `VendorCode="V-0000"`. It is the right **phase-2** target, once the macros retire — and it would
 need rewriting for SQL Server anyway (`ON DUPLICATE KEY UPDATE`/`LAST_INSERT_ID` are MySQL-only).
 
-### 5.6 Proposed design
-**New `lp.py`**, two queries instead of the macro's 2N:
-1. **Reuse pass** — `SELECT TOP (n) …` with the ordering fixed; taking `TOP (n)` in one shot makes
-   the within-run exclusion structural and replaces the `UsedLP` string entirely.
-2. **Mint pass** — `MAX(...)+1` once, hand out consecutive serials for the remaining boxes.
-3. Assign reused plates to the earliest boxes, then minted — matching the macro's order.
+### 5.6 How it is wired — the order is the design
+```
+box_count(std, qty)          ← same resolved packing standard the BPT used (guard #16)
+      ↓  n
+_lp_prepare(n, …)            ← dev-mode / lp_mode / pyodbc gate; returns plates + an OPEN conn
+      ↓  plates
+build_box_labels(…, plates=) ← refuses a SHORT list; never pads with a dummy
+      ↓  sql_row per box
+_lp_commit_and_seed(…)       ← INSERT via sql_write → commit → verify_inserted → seed caches
+      ↓
+print the ZPL                ← first label only leaves the printer after the commit
+```
+The caller cannot size the mint until it knows the box count, and the box count comes from the
+packing standard — hence `boxlabel.box_count(std, po_qty)`, which takes the standard **app.py has
+already resolved** rather than re-deriving the formula. One resolver, one box count, one mint size.
 
-`boxlabel.build_box_labels(..., plates=None)` takes the list; the dummy stays as the dev/offline
-fallback.
+**`build_box_labels(plates=…)` refuses a short list** rather than topping it up with dummies: a
+dummy plate mixed into a live run puts an unrecorded plate on a real box. The whole run is
+refused, and nothing prints.
 
 **Concurrency — the obvious fix is a trap.** `SELECT MAX(right(lp,5)) WHERE SUBSTRING(...)` is
 **non-sargable** and table-scans; wrapping it in `XLOCK, HOLDLOCK` risks lock escalation to a
-table-level exclusive lock on a production table — worse than the bug. Use instead:
-- **`sp_getapplock`** (e.g. `LP_MINT_PK_260814`) — a cheap named mutex, no table locks. Fully
-  serialises app-vs-app.
-- **Read-back verification with retry** for app-vs-macro. Nothing can lock out the macro safely,
-  and the macro never locked either. Residual risk is small: areas use disjoint serial ranges, so a
-  collision needs the app *and* the macro minting in the same area in the same instant.
+table-level exclusive lock on a production table — worse than the bug. What `lp.py` does instead:
+- **`sp_getapplock`** named `LP_MINT_{AREA}_{yymmdd}`, `@LockOwner='Session'` — a cheap named
+  mutex, no table locks, fully serialising **app-vs-app**. Session (not Transaction) ownership
+  because `lp.py` does not own the caller's transaction boundaries; it is released in a `finally`,
+  and in the worst case dies with the connection. **A reuse-only run never takes the lock.**
+- **Read-back before the INSERT, with up to 3 retries**, for **app-vs-macro**. Nothing can lock out
+  the macro safely, and the macro never locked either. If a candidate serial already exists we
+  re-read `MAX` and try again; after 3 attempts it raises and nothing prints.
+- **`verify_inserted()` after the commit** — every plate must appear **exactly once**. This is the
+  backstop: if the macro squeezed a duplicate through anyway, the operator finds out *before* the
+  label prints, not when two boxes reach the floor carrying the same plate.
+- `TRY_CAST` (not `CAST`) on `RIGHT(lp,5)`, so one malformed legacy row cannot abort every mint.
+- A **5-digit roll guard**: at 99999 in a day it raises rather than minting into the next area's
+  range. Impossible in practice; silent corruption is not an acceptable failure mode for it.
 
-**Out of scope for the first pass:** small-box `-ThungNho` (incl. the `1024884-329` hardcode), the
-component BOM ticket (`ModeBOMPick` → Canon02, `CB_PO_BOM_Ticket_Database`), the BPT audit INSERT
-into `CB_Production_BOM_Print`, the wooden-crate dual-printer routing, and the new-part Outlook-COM
+**Out of scope, still:** small-box `-ThungNho` (incl. the `1024884-329` hardcode), the component
+BOM ticket (`ModeBOMPick` → Canon02, `CB_PO_BOM_Ticket_Database`), the BPT audit INSERT into
+`CB_Production_BOM_Print`, the wooden-crate dual-printer routing, and the new-part Outlook-COM
 email.
 
-### 5.7 Open questions blocking the build
-1. **What are `tg_user` / `tg_dev`** in the macro — Windows username and machine name?
-2. **Does `svcsqllocal` have DDL rights?** Not needed now; decides whether phase 2 needs a DBA.
-3. **Is `Gen_other_info` still in use?** If yes it keeps consuming AD's pool — an argument for
-   staying on `MAX+1` indefinitely.
-4. Sign-off on the deviations in §5.4 (insert-then-print, and the `ORDER BY` fix, which makes us
-   pick a *different* plate than the macro in those 113 groups).
-5. A **single-box test PDO** and a safe window for the first live mint.
+### 5.7 What is still open — and what was assumed to ship
+Answered by assumption, stated out loud rather than left blocking:
+1. **`tg_user` / `tg_dev` → Windows username + machine name** (`_lp_user_device()`, using
+   `getpass.getuser()` / `platform.node()`). Both are **audit-only columns — nothing joins on
+   them** — and the board PCs are exactly one per area, which is what makes `Device_ID` meaningful
+   at all. If the macro means something else, those two lines are the only thing to change.
+2. **`svcsqllocal` DDL rights** — still unknown, still not needed. `MAX+1` uses no new objects.
+   `sp_getapplock` needs only `public`. It decides whether **phase 2** needs a DBA, not this.
+3. **Is `Gen_other_info` still in use?** Unchanged, and it no longer blocks anything: `MAX+1`
+   self-heals against it either way. If it *is* live it is an argument for staying on `MAX+1`
+   indefinitely rather than moving to `area_counters`.
 
----
+**Genuinely still open — these gate the first LIVE print, not the code:**
+4. **Sign-off on the two deviations in §5.4** — insert-then-print, and the `ORDER BY` fix that makes
+   us pick a *different* plate than the macro in those 113 groups.
+5. **A single-box test PDO and an agreed window for the first live mint.** The suggested sequence:
+   flip ONE area to `live`, print a **1-box** PDO, read the row back in SQL (plate, station form,
+   `User_ID`/`Device_ID`, `PII_PO`), confirm the next macro print continues the sequence rather
+   than colliding, and only then flip the other two areas.
+6. **The column names in the INSERT were given verbally** (§11.1) and have never executed. They
+   live in exactly one place — the `sql_row` dict in `boxlabel.build_box_labels` — because
+   `lp.insert_plate_rows` builds its statement from that dict's keys. Expect the first live print
+   to be where a wrong name surfaces, and fix it there.
 
 ## 6. SAFETY GUARDS — every guard that protects operator state or production data
 
@@ -490,9 +545,13 @@ email.
     not PDOs — auto-clear once at the start of a new production day by design, guard #4.)
 11. **Worker-drag: newest drop wins** (`_wdropSeq`) — a slow earlier `/api/board` response cannot
     clobber the board after a newer drag.
-12. **Printing today cannot write to production:** the LP is a DUMMY and **no SQL INSERT / email is
-    performed**, so a mis-print cannot touch `[License Plate]`, `CB_Production_BOM_Print`, or send
-    mail.
+12. **Printing can now write to production — but only when switched on, per area.**
+    `print_settings_{AREA}.json` → `lp_mode` defaults to `'dummy'`, so a fresh board, a `git pull`,
+    or a rebuilt PC all print realistic-but-unrecorded plates and touch nothing. Only flipping
+    **🖨 Print settings → License Plate source → LIVE** (behind a confirm) starts minting. A typo
+    in the POSTed value falls back to `'dummy'` — the setting fails safe towards not touching the
+    production sequence. Still untouched either way: `CB_Production_BOM_Print` and the new-part
+    email.
 13. **MainDatabase opened read-only + cached**; a bad path fails the print call cleanly
     (`"Cannot open MainDatabase"`) without crashing the board. `printing.py` win32 imports are lazy,
     so a non-Windows / no-pywin32 host degrades to a "not printed" warning.
@@ -504,9 +563,12 @@ email.
 16. **The two print engines must share one resolver.** `bpt` and `boxlabel` both call
     `resolve_pack_std`; if they ever diverge, a PDO prints N tickets and a different number of
     labels.
-17. **When the real mint lands, dev mode MUST use dummy plates.** The mint is a `SELECT`, so
-    `sql_write()` will *not* gate it — a dev run would consume real serials while skipping the
-    INSERT, corrupting the live sequence. This needs an explicit `if DEV_MODE` branch.
+17. **Dev mode short-circuits the mint itself, not the write.** The mint is a `SELECT`, so
+    `sql_write()` does **not** gate it — a dev run left to itself would consume real serials off
+    the live sequence and then skip the INSERT that records them, corrupting the counter for the
+    real areas. `_lp_prepare()` therefore checks `DEV_MODE` **first, before any SQL**, and returns
+    dummy plates with no connection. `sql_write()` on the INSERT is the second layer, not the
+    first. Never reorder those checks.
 18. **BPT double-print guard.** `bpt_printed` is False while a background job runs; the browser-tab
     fallback must also check `!d.bpt_job`, or the ticket prints twice.
 19. **A paused timer can never be overdue.** Off-hours / no-operator freezes the estimate; without
@@ -517,6 +579,23 @@ email.
     client always knows whether to open the tab fallback.
 22. **Work-order matching is case-insensitive and `SO-` is hyphen-anchored** — the first prevents
     silently losing orders, the second prevents ordinary words becoming work orders.
+23. **Mint + INSERT commit BEFORE the first label prints** (§5.4 #2). A printer failure then costs
+    an orphan row and a gap in the sequence; the old order cost a duplicate plate on a real box.
+24. **A short plate list refuses the whole run.** `build_box_labels(plates=…)` never pads with a
+    dummy to reach the box count — an unrecorded plate on a shipped box is worse than not printing.
+25. **A blank `PII_PO` skips the reuse pass entirely** (§5.3). `PII_PO = ''` would match every
+    other blank-PII row and hand the PDO a pile of unrelated plates.
+26. **An unknown area raises rather than defaulting.** `lp.area_serial_spec()` has no fallback
+    base — a default would silently mint into whichever area it defaulted to. Same reason
+    `make_dummy_lp` is area-driven now: the old hardcoded `200000` made every AD/RP test plate
+    claim to be a Packaging one.
+27. **`verify_inserted()` runs after the commit and before printing.** Every plate must appear
+    exactly once. This is the only thing standing between a macro-vs-app collision and two boxes
+    on the floor with the same plate.
+28. **Seed `_license_plate_cache` at print time, in the same place as the INSERT.** Otherwise a GL
+    removing a just-printed order records no suppression (`_record_lp_suppression` reads that
+    cache, which only the 60s poll used to populate) and the next poll puts the order straight
+    back. Fixes the race §7 flagged; the green `has_lp` badge now also appears immediately.
 
 ---
 
@@ -541,7 +620,12 @@ email.
   auto-queue.
 - **Packaging type via string prefix** (`PL`/`SPL`/`WC`), now configurable in print settings — the
   user explicitly chose this over a `packaging_type` enum table.
-- **DUMMY LP first** — get the whole flow testable on real printers before touching SQL.
+- **DUMMY LP first, and dummy stays** — the flow was proven on real printers before SQL was
+  touched, and `lp_mode='dummy'` remains the default and the permanent offline/dev path, not a
+  scaffold to delete. A board with no pyodbc, a dev run, or an area not yet switched on all still
+  print.
+- **Live minting is a per-area switch, not a deploy** — `git pull` must never be the thing that
+  starts consuming production serials on three PCs at once.
 - **The BPT spools in the background.** The operator needs to *know* it printed, not *watch* it.
 - **`overdue_grace_min` is published by the server**, so five views cannot drift apart.
 - **Why LP auto-queue stays** (§2h): after the real mint lands it stops being a *rival* placement
@@ -549,11 +633,13 @@ email.
   one-shot write to `assignments_{AREA}.json`; auto-queue re-derives from SQL every 60 s, so a lost
   or rolled-back JSON, or a rebuilt board PC, still recovers. Guard #2 of `auto_queue_from_license_plate`
   (already on the board → skip) means it can never fight the print button.
-  ⚠ **One race to fix when the mint lands:** `_record_lp_suppression()` reads `_license_plate_cache`,
-  which only the 60s poll populates. Once app.py is the LP writer, a GL removing a just-printed
-  order records **no** suppression, and the next poll re-adds it. Fix: seed
-  `_license_plate_cache[po]` at print time, in the same place as the INSERT. (Bonus: the `has_lp`
-  badge then appears immediately instead of up to 60 s later.)
+  ✅ **The race this predicted is fixed in `.12`:** `_record_lp_suppression()` reads
+  `_license_plate_cache`, which only the 60s poll used to populate — so once app.py became the LP
+  writer, a GL removing a just-printed order would have recorded **no** suppression and the next
+  poll would have re-added it. `_lp_commit_and_seed()` now seeds `_license_plate_cache[po]` at
+  print time, in the same place as the INSERT (guard #28). The `has_lp` badge appears immediately
+  instead of up to 60 s later. Note the 60s poll then **replaces** the whole cache from SQL — which
+  is correct, because by then the row really is there.
 
 ---
 
@@ -566,6 +652,7 @@ email.
 | `.9` | Printing **~14× faster** ZPL + lossless ZPL compression (7029→835 KB); warm MainDatabase; simplex BPT; ticket layout rework (banner, barcodes, `PDO:`, pallet tag); per-stage timings. |
 | `.10` | **BPT spools in the background** (9.91 s → 0.05 s response); persistent + prewarmed browser profile; lean headless flags; render/spool split in the logs. |
 | `.11` | **`SO-` work orders** alongside `PDO`; **20-minute scan grace** before OVERDUE, with the station card turning red — applied to the control board, wall board, big screen and shared viewer. |
+| `.12` | **Real License Plate mint** (`lp.py`): reuse-then-mint, `sp_getapplock` + read-back retry, `[License Plate]` INSERT **committed before printing**, per-area serial ranges (the hardcoded Packaging base is gone), `lp_mode` live/dummy switch per area **defaulting to dummy**, `_license_plate_cache` seeded at print time. |
 
 Also this session: `stations_only.html` reworked into a **two-area (PK + RP) wall board** with
 per-area freshness badges, no selector, fitting 1920×1080 without scrolling (row-proportional flex
@@ -587,8 +674,17 @@ plus a `scale()` backstop). All missing templates and shared viewers restored to
 - `DASHBOARD_STATUS_DIR`, `CAPACITY_FILES={'AD','PK','RP':…}`.
 - `PRODUCTION_START=6.0`, `CA1_END=14.167`, `PRODUCTION_END=22.333`, `NEXT_SHIFT_OPEN_EARLY_HRS=15/60`.
 - Printing: `_MAINDB_DEFAULT`, `_EMAIL_DEFAULT`, `_print_settings_defaults()` (zebra/canon/maindb/
-  email/silent_bpt/sumatra_path/browser_path/pallet_prefixes/crate_prefixes) →
-  `data/print_settings_{AREA}.json`.
+  email/silent_bpt/sumatra_path/browser_path/pallet_prefixes/crate_prefixes/**`lp_mode`**) →
+  `data/print_settings_{AREA}.json`. **`lp_mode` defaults to `'dummy'`** — see §5 and guard #12.
+
+### `lp.py`
+- `AREA_SERIAL = {'AD': ('0', 0), 'PK': ('2', 200000), 'RP': ('5', 500000)}` — the **only** place
+  an area appears in the mint.
+- `T_LP` / `T_WIP` / `T_FG` — the three table names, in one place, because the schemas were given
+  verbally (§11.1).
+- `MINT_RETRIES = 3`, `APPLOCK_TIMEOUT_MS = 10000`, `MAX_DAILY_SERIAL = 99999`.
+- The `[License Plate]` **column names are not here** — they are the keys of the `sql_row` dict in
+  `boxlabel.build_box_labels`, and `insert_plate_rows` builds its statement from them.
 
 ### `bpt.py` / `boxlabel.py` / `label_print.py` / `printing.py`
 - Buckets `{PVN, Poland, Other}`; `PALLET_PREFIXES=('PL','SPL')`, `CRATE_PREFIXES=('WC',)`.
@@ -609,7 +705,8 @@ plus a `scale()` backstop). All missing templates and shared viewers restored to
 
 ## 10. Planned / not started
 
-1. **Real LP mint + `[License Plate]` INSERT** (§5) — the next work item.
+1. ~~Real LP mint + `[License Plate]` INSERT~~ — **built in `.12`** (§5). What remains is not code:
+   sign-off on the two deviations, and the single-box first live print (§5.7 items 4–6).
 2. **Remaining macro modes:** small-box `-ThungNho`, component BOM ticket, BPT audit INSERT,
    wooden-crate dual-printer routing (the silent path makes this possible; the browser dialog never
    could), new-part Outlook-COM email (must never block printing).
@@ -620,10 +717,12 @@ plus a `scale()` backstop). All missing templates and shared viewers restored to
    are already stale (the block labelled "API: NG flag" is 429 lines and contains all the printing
    endpoints). Target split: `config.py` · `store.py` · `plan_excel.py` · `db.py` · `capacity.py` ·
    `etc.py` · `api_*.py` · `ui_setup.py`, leaving `app.py` ~400 lines of wiring.
-   **Sequencing (agreed):** do the LP work first on the current structure — refactoring *and*
-   adding production SQL writes in the same window makes a floor failure impossible to attribute.
-   Then extract **incrementally, one module per change**, each shipped and run for a day. `db.py`
-   falls out of the LP work naturally rather than as separate churn.
+   **Sequencing (agreed):** the LP work went first, on the current structure — refactoring *and*
+   adding production SQL writes in the same window would make a floor failure impossible to
+   attribute. That half is done, but the clock has not started: **the refactor should wait until
+   the first live mint has actually run**, for exactly the same reason. Then extract
+   **incrementally, one module per change**, each shipped and run for a day. `lp.py` is the first
+   piece of `db.py` and came out of the LP work naturally rather than as separate churn.
 5. **Dashboard-feed cleanup:** sweep stale `.tmp` files in `dashboard_status`; trim the ~1 MB
    snapshot (drop the unassigned-PDO pool the station views do not use).
 6. **D365 goods receipt** — batch-file export, or hardened in-app Selenium with ONE service account;
@@ -635,7 +734,14 @@ plus a `scale()` backstop). All missing templates and shared viewers restored to
 
 ## 11. Known gaps / to verify on a real deployment
 1. **SQL schemas** for `Nhaplecuoingay_All` / `License Plate` / `CB_Production_BOM_Print` were given
-   verbally — watch the console for SQL errors when the real writes land.
+   verbally, and `.12` is the first code that WRITES to one of them. The mint's three statements
+   (reuse `SELECT`, `MAX` `SELECT`, `INSERT`) have never executed against the real server. The
+   first live print is where a wrong column name will surface — it fails loudly and before
+   printing, by design, but expect it. Names live in `lp.T_*` and in `boxlabel`'s `sql_row` keys.
+   Specifically unverified: `[Production date]` on `Nhaplecuoingay_All` (only used in the new
+   `ORDER BY`), and whether `[License Plate]` is `varchar` (assumed — a `char` column with padding
+   would break `RIGHT(...,5)`, though it would have broken the macro too, so it is almost
+   certainly fine).
 2. **Ahead/Behind SQL half** (`combined_dashboard.py`) uses ODBC Driver 17.
 3. **Attendance notes / shift inference** validated against synthetic data + the 14:10 fix —
    validate on real files.
@@ -661,6 +767,10 @@ plus a `scale()` backstop). All missing templates and shared viewers restored to
 - **Printing:** `pip install -r requirements-print.txt` → put `SumatraPDF.exe` in `tools\` next to
   `app.py` → top bar **🖨 Print** to set queues, MainDatabase path and pallet prefixes → hover a PDO
   card → **🖨** → station + prod time → **Issue & queue**. See `PRINTING_README.md`.
+- **License Plates print as DUMMY until you say otherwise.** 🖨 Print settings → **License Plate
+  source** → LIVE (confirm prompt) switches THIS area to real minting. The print-result dialog
+  states which one every run used — a dummy and a real plate are the same 18 characters, so the
+  label itself cannot tell you. **Boxes printed with a dummy plate must not be shipped or scanned.**
 - **Big screen:** `python combined_dashboard.py` → `http://<pc-ip>:8080/` (also starts the
   `aheadbehind_status.js` writer). **Restart it after editing any template.**
 - **Shared viewers:** open `\\npvshare\...\dashboard_status\shared_rotator.html`.
@@ -672,13 +782,17 @@ plus a `scale()` backstop). All missing templates and shared viewers restored to
    chat. If the user asks for files anyway, they can still be attached, but the repo is the record.
 2. Restate the three load-bearing concepts (§0) and read the **safety guards (§6)** before touching
    anything. When touching workers / `remaining_qty` / splits, follow §2 + §6.
-3. **The next work item is §5 — the real LP mint.** It is blocked only on the five answers in §5.7.
-   Route every new SQL write through `sql_write()`, wrap the mint in `sp_getapplock`, insert before
-   printing, and give dev mode an explicit dummy-plate branch (§6.17).
-4. **Measure before optimising.** This session two confident performance theories were wrong and the
+3. **The LP mint is written (§5) and every board still prints dummies.** The next thing is not
+   code — it is the **first live print**: sign-off on the two deviations (§5.4), then ONE area
+   flipped to `live`, ONE single-box test PDO, and the row read back in SQL. Only then the other
+   two areas. Hold the `app.py` refactor until after that, so a floor failure stays attributable.
+4. **When you do touch the mint:** route every write through `sql_write()`, never let the
+   `DEV_MODE` check move below the SQL (guard #17), and remember the mint is a `SELECT` that
+   `sql_write()` cannot protect you from.
+5. **Measure before optimising.** This session two confident performance theories were wrong and the
    instrumentation caught both. `[issue timing]` and `[bpt print]` lines exist for that reason.
-5. **Verify claims against the artefact**, not against intent: the byte-identical `_gfa_hex` check,
+6. **Verify claims against the artefact**, not against intent: the byte-identical `_gfa_hex` check,
    the independent ZPL decoder, the DOM measurement that contradicted a screenshot. Each of those
    caught a real bug or a false alarm.
-6. Printing still cannot be tested off-Windows. Anything touching pywin32 or SumatraPDF needs the
+7. Printing still cannot be tested off-Windows. Anything touching pywin32 or SumatraPDF needs the
    board PC.
