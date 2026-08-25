@@ -191,7 +191,21 @@ must go through `sql_write()`.** Surfaced at startup, in `/api/board` `dev_mode`
   - Only the **in-progress ETC** colours the station; `queue_clear` running long is a
     different thing and must not turn a station red (`isDuration` guard in `startETC`).
   - A **paused** timer (off-hours / no operator) is frozen, so it can never be overdue —
-    both `board.html` and `stations_only.html` check that before flagging.
+    every view checks that before flagging.
+  - **Big screen** (`combined_dashboard.py` + `templates/dashboard.html`):
+    `read_station_area()` passes `overdue_grace_min` through **per area** (a board on an
+    older build keeps `DEFAULT_OVERDUE_GRACE_MIN` rather than borrowing another area's
+    number). The grace rides on each card as `data-grace`, so the 1s `tick()` doesn't
+    need to know which area a card belongs to. **`tick()` must also toggle the card
+    class** — `/api/status` is polled only every 60s, so otherwise a station would stay
+    green for up to a minute after crossing the grace. An **OVERDUE pill** in the top bar
+    counts `.card.overdue` elements in `tick()` (not in `render()`) for the same reason:
+    counting at render time would leave the pill disagreeing with the cards.
+  - `templates/aheadbehind.html` and `templates/rotator.html` needed **no change** — the
+    first shows earned-vs-pace hours with no per-order ETC, the second is only an iframe
+    switcher.
+  - ⚠ Flask caches Jinja templates when `debug=False`; **restart `combined_dashboard.py`
+    after editing a template** or you will be testing the old one (this cost time once).
 
 ## 3. Excel plan column map (`COL`, 0-based) and per-area state files
 `A`=pdo, `B`=part, `C`=raw_part, `D`=desc, `E`=qty, `F`=dest, `G`=pack_type (area filter + production

@@ -57,6 +57,13 @@ STATION_AREAS = ['PK', 'AD', 'RP']
 STATION_AREA_LABELS = {'PK': 'PACKAGING', 'AD': 'ASSEMBLY', 'RP': 'RAW PART'}
 STATION_STALE_AFTER_SEC = 30
 
+# Grace between an order hitting its ETC and being shown as OVERDUE — the
+# warehouse pulls and scans FG in some minutes after the operator actually
+# finishes the box. The authoritative value is published by each board in its
+# {AREA}_status.json (app.py OVERDUE_GRACE_MIN); this is only the fallback for a
+# board still running an older build that doesn't publish it.
+DEFAULT_OVERDUE_GRACE_MIN = 20
+
 def read_station_area(area):
     """Read one area's status JSON and reduce it to what the station report
     shows. Never raises — a missing/locked/half-written file degrades to an
@@ -64,7 +71,8 @@ def read_station_area(area):
     path = os.path.join(DASHBOARD_STATUS_DIR, f'{area}_status.json')
     base = {'area': area, 'label': STATION_AREA_LABELS.get(area, area),
             'available': False, 'stale': True, 'age': None, 'ts': None,
-            'file_area': None, 'mismatch': False, 'shift_windows': None, 'stations': []}
+            'file_area': None, 'mismatch': False, 'shift_windows': None,
+            'overdue_grace_min': DEFAULT_OVERDUE_GRACE_MIN, 'stations': []}
     try:
         mtime = os.path.getmtime(path)
     except OSError:
@@ -127,6 +135,10 @@ def read_station_area(area):
         'age': round(age),
         'ts': snap.get('ts'),
         'shift_windows': snap.get('shift_windows'),
+        # Per-area, not global: a board still on an older build won't publish it,
+        # and its stations should keep the fallback rather than borrow another
+        # area's number.
+        'overdue_grace_min': snap.get('overdue_grace_min', DEFAULT_OVERDUE_GRACE_MIN),
         'stations': stations,
         'risk_raw': risk_raw,
     }
