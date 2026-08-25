@@ -201,9 +201,13 @@ must go through `sql_write()`.** Surfaced at startup, in `/api/board` `dev_mode`
     green for up to a minute after crossing the grace. An **OVERDUE pill** in the top bar
     counts `.card.overdue` elements in `tick()` (not in `render()`) for the same reason:
     counting at render time would leave the pill disagreeing with the cards.
-  - `templates/aheadbehind.html` and `templates/rotator.html` needed **no change** — the
-    first shows earned-vs-pace hours with no per-order ETC, the second is only an iframe
-    switcher.
+  - **Shared viewer** (`shared_dashboard.html`): same treatment, but it builds its own
+    `DATA` client-side in `buildDATA()`, so the grace comes straight off
+    `snap.overdue_grace_min` rather than through an API.
+  - **No change needed** in `templates/aheadbehind.html`, `templates/rotator.html`,
+    `shared_aheadbehind.html` or `shared_rotator.html` — the ahead/behind pages show
+    earned-vs-pace hours with no per-order ETC (verified: zero countdown references), and
+    the rotators are only iframe switchers.
   - ⚠ Flask caches Jinja templates when `debug=False`; **restart `combined_dashboard.py`
     after editing a template** or you will be testing the old one (this cost time once).
 

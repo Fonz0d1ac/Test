@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Data is loaded off the share with zero networking: a hidden iframe pulls the
+     *_status.js files (fetch/XHR are CORS-blocked from file://; <script src> is
+     not), and the visible page re-renders IN PLACE from that data — so the 60s
+     refresh is seamless (no full-page reload, no flash). No web server, no
+     firewall rule; anyone just opens this file off the share. -->
+<title>Shop Floor — Live Status</title>
+<style>
+:root{
+  --bg:#0d1017;--panel:#161b26;--panel2:#1d2431;--border:#2a3342;--border2:#3a465a;
+  --text:#f2f5fb;--text2:#aab3c5;--text3:#6b7688;
+  --green:#2fdb96;--green-bg:rgba(47,219,150,.14);--green-dim:#0f5c3d;
+  --amber:#ffb92e;--amber-bg:rgba(255,185,46,.14);--amber-dim:#7a5010;
+  --red:#ff5d5d;--red-bg:rgba(255,93,93,.14);--red-dim:#7a2020;
+  --blue:#5aa6ff;--blue-bg:rgba(90,166,255,.14);
+  --purple:#bd93f0;--purple-dim:#3d2a5a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  overflow-y:auto;overflow-x:hidden;padding-bottom:8px}
+.topbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:18px;
+  padding:8px 20px;background:linear-gradient(180deg,#111624,#0d1017);border-bottom:1px solid var(--border)}
+.title{font-size:22px;font-weight:700;letter-spacing:.06em}
+.title .dot{display:inline-block;width:11px;height:11px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 10px var(--green);margin-right:10px;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.sp{flex:1}
+.summary{display:flex;gap:10px}
+.pill{font-size:15px;padding:6px 14px;border-radius:20px;background:var(--panel2);border:1px solid var(--border2);color:var(--text2);white-space:nowrap}
+.pill b{color:var(--text);font-weight:700}
+.pill.run b{color:var(--green)}
+.pill.idle b{color:var(--text3)}
+.pill.paused b{color:var(--amber)}
+.pill.overdue{background:var(--red-bg);border-color:var(--red);color:var(--red)}
+.pill.overdue b{color:var(--red)}
+.clock{font-size:20px;font-family:'Consolas',monospace;color:var(--text2)}
+
+/* shift timeline bar (ported from the control board) */
+.shift-timeline{position:relative;height:30px;margin:8px 20px 2px}
+.tl-track{position:absolute;inset:0;border-radius:8px;overflow:hidden;display:flex;background:var(--panel2)}
+.tl-seg{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#0d1017;flex-shrink:0}
+.tl-seg.ca1{background:var(--blue)}
+.tl-seg.ca2{background:var(--purple)}
+.tl-seg.overlap{background:var(--amber)}
+.tl-seg.hc{background:var(--green)}
+.tl-name{font-size:13px;font-weight:700;line-height:1.1}
+.tl-time{font-size:10.5px;opacity:.85;font-family:'Consolas',monospace;line-height:1.1}
+.tl-now{position:absolute;top:-8px;bottom:-8px;width:4px;background:#fff;z-index:5;box-shadow:0 0 8px rgba(255,255,255,.8);border-radius:2px}
+.tl-now-label{position:absolute;top:-30px;transform:translateX(-50%);font-size:14px;font-weight:800;font-family:'Consolas',monospace;color:#fff;white-space:nowrap;text-shadow:0 1px 3px #000}
+.tl-edge{position:absolute;bottom:3px;font-size:11px;font-family:'Consolas',monospace;color:rgba(255,255,255,.6);z-index:3}
+.tl-edge.left{left:8px}
+.tl-edge.right{right:8px}
+
+.area{margin:6px 18px 0}
+.area-head{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+.area-name{font-size:19px;font-weight:700;letter-spacing:.08em;color:var(--text)}
+.area-stat{font-size:14px;color:var(--text3)}
+.area-badge{font-size:13px;padding:3px 11px;border-radius:14px;font-weight:700;letter-spacing:.04em}
+.area-badge.ok{background:var(--green-bg);color:var(--green)}
+.area-badge.stale{background:var(--red-bg);color:var(--red)}
+.area-line{flex:1;height:1px;background:var(--border)}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(205px,1fr));gap:9px}
+
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:7px 12px 7px 17px;
+  position:relative;overflow:hidden;transition:border-color .2s}
+.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:11px;background:var(--text3)}
+.card.run::before{background:var(--green)}
+.card.paused::before{background:var(--amber)}
+.card.idle::before{background:var(--border2)}
+.card.run{border-color:var(--green-dim)}
+.card.paused{border-color:var(--amber-dim)}
+/* Past ETC + the scan grace — the running order really is late. */
+.card.overdue::before{background:var(--red)}
+.card.overdue{border-color:var(--red);background:linear-gradient(180deg,rgba(255,93,93,.10),var(--panel))}
+
+.c-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.sid{font-size:20px;font-weight:700;font-family:'Consolas',monospace;letter-spacing:.02em}
+.ops{display:flex;align-items:center;gap:5px;font-size:15px;font-weight:600;padding:3px 9px;border-radius:12px;
+  background:var(--blue-bg);color:var(--blue)}
+.ops.zero{background:var(--panel2);color:var(--text3)}
+
+.pdo{font-size:17px;font-weight:700;font-family:'Consolas',monospace;color:var(--text);margin-bottom:1px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.part{font-size:12.5px;color:var(--text2);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.etc-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.etc-lbl{font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.07em}
+.etc{font-size:25px;font-weight:800;font-family:'Consolas',monospace;line-height:1}
+.etc.ok{color:var(--green)}
+.etc.soon{color:var(--amber)}
+.etc.urg{color:var(--red)}
+.etc.paused{color:var(--amber);font-size:20px;font-weight:700}
+.etc.none{color:var(--text3);font-size:18px;font-weight:600}
+
+.prog{margin-top:5px;height:5px;border-radius:4px;background:var(--panel2);overflow:hidden}
+.prog-bar{height:100%;border-radius:4px;background:var(--green);transition:width .5s}
+.qty{margin-top:4px;font-size:12px;color:var(--text3);font-family:'Consolas',monospace;text-align:right}
+
+.idle-txt{font-size:18px;font-weight:700;color:var(--text3);letter-spacing:.1em;padding:9px 0 7px}
+
+.offline{background:var(--red-bg);border:1px solid var(--red-dim);border-radius:12px;
+  padding:20px;text-align:center;color:var(--red);font-size:18px;font-weight:600}
+.offline small{display:block;color:var(--text3);font-weight:400;margin-top:5px;font-size:14px}
+
+.area.stalewrap .grid{opacity:.4;filter:grayscale(.5)}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span class="title"><span class="dot"></span>SHOP FLOOR — LIVE STATUS</span>
+  <div class="sp"></div>
+  <div class="summary" id="summary"></div>
+  <span class="clock" id="clock">--:--:--</span>
+</div>
+
+<div class="shift-timeline" id="shift-timeline"></div>
+<div id="areas"></div>
+
+<!-- Hidden loader: re-navigated every 60s to re-read the *_status.js files from
+     disk; it posts the fresh data up to this page, which re-renders in place. -->
+<iframe id="loader" style="display:none" aria-hidden="true"></iframe>
+
+<script>
+let DATA = null;
+window.NPV_STATUS = {};
+
+// Which areas this screen shows, and their display names when a file is missing.
+const AREA_ORDER = ['PK','AD','RP'];
+const AREA_LABEL = {PK:'PACKAGING', AD:'ASSEMBLY', RP:'RAW PART'};
+const DEFAULT_GRACE_MIN = 20;   // fallback only; each board publishes its own
+const STALE_SEC = 90;   // a file older than this (boards write every 5s) = stale/offline
+
+// ── Data layer ────────────────────────────────────────────────────────────────
+// Transform the raw board snapshots (window.NPV_STATUS[AREA], the same shape
+// build_board_snapshot() writes) into the {areas:[...]} shape render() expects —
+// exactly what combined_dashboard.py's /api/status used to return server-side.
+function buildDATA(){
+  const now = Date.now();
+  const S = window.NPV_STATUS || {};
+  const areas = AREA_ORDER.map(code=>{
+    const snap = S[code];
+    if(!snap){
+      return {area:code, label:AREA_LABEL[code]||code, available:false, age:null, stations:[]};
+    }
+    const age = snap.__written ? Math.round((now - snap.__written)/1000) : null;
+    const stale = (age == null) || (age > STALE_SEC);
+    const fileArea = snap.area;
+    const mismatch = !!(fileArea && fileArea !== code);
+    const stations = (snap.stations||[]).map(sid=>{
+      const cell = (snap.board||{})[sid] || {};
+      const ip = cell.inprogress;
+      const t  = cell.timer || {};
+      return {
+        id: sid,
+        pdo: ip ? ip.id : null,
+        part: ip ? (ip.desc || ip.part || '') : '',
+        ops: (cell.workers||[]).length,
+        paused: !!t.paused,          // build_board_snapshot sets paused whenever in-progress but not running
+        etc: t.etc || null,
+        completed: ip ? (ip.completed_qty != null ? ip.completed_qty : (ip.qty - (ip.remaining_qty||0))) : null,
+        qty: ip ? ip.qty : null,
+      };
+    });
+    return {
+      area:code, label:(snap.area_label||AREA_LABEL[code]||code),
+      available:true, stale, mismatch, file_area:fileArea, age,
+      shift_windows: snap.shift_windows, stations,
+      // Per-area, straight off that board's own snapshot: a board still on an
+      // older build won't publish it and keeps the fallback rather than
+      // borrowing another area's number.
+      overdue_grace_min: (snap.overdue_grace_min != null) ? snap.overdue_grace_min : DEFAULT_GRACE_MIN
+    };
+  });
+  DATA = { areas, server_time: null };  // clock uses local time (server_time null)
+}
+
+// ── everything below is the combined dashboard's render logic ──────────────────
+function fmtCountdown(iso, graceMin){
+  // Past ETC the countdown holds at 00:00 for the grace period: the warehouse
+  // scans FG in some minutes after the operator finishes the box, so without it
+  // every on-time order reads OVERDUE for that whole window.
+  const d = new Date(iso) - new Date();
+  if(isNaN(d)) return {text:'—', cls:'none', overdue:false};
+  const graceMs = ((graceMin!=null) ? graceMin : DEFAULT_GRACE_MIN) * 60000;
+  if(d <= 0){
+    const late = (-d) >= graceMs;
+    return {text: late ? 'OVERDUE' : '00:00', cls:'urg', overdue: late};
+  }
+  const tm = Math.floor(d/60000);
+  const h = Math.floor(tm/60), m = tm%60;
+  const text = h>0 ? `${h}h ${String(m).padStart(2,'0')}m` : `${m}m`;
+  const cls = tm<30 ? 'urg' : tm<120 ? 'soon' : 'ok';
+  return {text, cls, overdue:false};
+}
+
+function stationCardHTML(s, graceMin){
+  // A paused timer is frozen (off-hours / no operator), so it can never be late.
+  const c0 = (s.etc && !s.paused && s.ops>0) ? fmtCountdown(s.etc, graceMin) : null;
+  const isOverdue = !!(c0 && c0.overdue);
+  const cls = s.pdo ? (s.paused || s.ops===0 ? 'paused' : (isOverdue ? 'overdue' : 'run')) : 'idle';
+  const opsCls = s.ops>0 ? '' : 'zero';
+  const opsHTML = `<span class="ops ${opsCls}" title="operators on this station">👷 ${s.ops}</span>`;
+
+  if(!s.pdo){
+    return `<div class="card idle">
+      <div class="c-head"><span class="sid">${esc(s.id)}</span>${opsHTML}</div>
+      <div class="idle-txt">IDLE</div>
+    </div>`;
+  }
+
+  let etcHTML;
+  if(s.paused || s.ops===0){
+    etcHTML = `<span class="etc paused">PAUSED</span>`;
+  }else if(s.etc){
+    // data-grace rides on the element so tick() doesn't need the area.
+    const c = c0 || fmtCountdown(s.etc, graceMin);
+    etcHTML = `<span class="etc ${c.cls}" data-etc="${esc(s.etc)}" data-grace="${graceMin!=null?graceMin:DEFAULT_GRACE_MIN}">${c.text}</span>`;
+  }else{
+    etcHTML = `<span class="etc none">—</span>`;
+  }
+
+  const qty = (s.completed!=null && s.qty!=null);
+  const prog = qty && s.qty>0 ? Math.max(0,Math.min(100, Math.round(s.completed/s.qty*100))) : -1;
+
+  return `<div class="card ${cls}">
+    <div class="c-head"><span class="sid">${esc(s.id)}</span>${opsHTML}</div>
+    <div class="pdo">${esc(s.pdo)}</div>
+    <div class="part">${esc(s.part||'')}</div>
+    <div class="etc-row"><span class="etc-lbl">Done in</span>${etcHTML}</div>
+    ${prog>=0 ? `<div class="prog"><div class="prog-bar" style="width:${prog}%"></div></div>
+      <div class="qty">${s.completed} / ${s.qty} pcs</div>` : ''}
+  </div>`;
+}
+
+// ── Shift timeline (ported from the control board) ────────────────────────────
+const DAY_START = 6.0, DAY_END = 22.333;
+const SHIFT_FALLBACK = {mode:'split', ca1_start:6.0, ca1_end:14.167, ca2_start:14.167, ca2_end:22.333};
+function tlPct(t){ return Math.max(0, Math.min(100, ((t - DAY_START) / (DAY_END - DAY_START)) * 100)); }
+function fmtHour(dec){
+  const h = Math.floor(dec), m = Math.round((dec - h) * 60);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+function pickShiftWindows(){
+  if(!DATA || !DATA.areas) return SHIFT_FALLBACK;
+  const live = DATA.areas.find(a => a.available && !a.stale && !a.mismatch && a.shift_windows);
+  const any  = DATA.areas.find(a => a.available && !a.mismatch && a.shift_windows);
+  return (live && live.shift_windows) || (any && any.shift_windows) || SHIFT_FALLBACK;
+}
+function humanAge(sec){
+  if(sec==null) return '';
+  if(sec<120) return sec+'s';
+  if(sec<7200) return Math.round(sec/60)+'m';
+  if(sec<172800) return Math.round(sec/3600)+'h';
+  return Math.round(sec/86400)+'d';
+}
+function renderShiftArc(){
+  const el = document.getElementById('shift-timeline');
+  if(!el) return;
+  const sw = pickShiftWindows();
+  let track = '';
+  if(sw.mode === 'hc'){
+    const w = tlPct(sw.hc_end) - tlPct(sw.hc_start);
+    track += `<div class="tl-seg hc" style="position:absolute;left:${tlPct(sw.hc_start)}%;width:${w}%;top:0;bottom:0">
+      <span class="tl-name">Hành chính</span><span class="tl-time">${fmtHour(sw.hc_start)}–${fmtHour(sw.hc_end)}</span></div>`;
+  }else{
+    const {ca1_start, ca1_end, ca2_start, ca2_end} = sw;
+    const ovStart = Math.max(ca1_start, ca2_start), ovEnd = Math.min(ca1_end, ca2_end);
+    track += `<div class="tl-seg ca1" style="position:absolute;left:${tlPct(ca1_start)}%;width:${tlPct(ca1_end)-tlPct(ca1_start)}%;top:0;bottom:0;z-index:1">
+      <span class="tl-name">Ca 1</span><span class="tl-time">${fmtHour(ca1_start)}–${fmtHour(ca1_end)}</span></div>`;
+    track += `<div class="tl-seg ca2" style="position:absolute;left:${tlPct(ca2_start)}%;width:${tlPct(ca2_end)-tlPct(ca2_start)}%;top:0;bottom:0;z-index:1">
+      <span class="tl-name">Ca 2</span><span class="tl-time">${fmtHour(ca2_start)}–${fmtHour(ca2_end)}</span></div>`;
+    if((ovEnd - ovStart) > 0.05){
+      track += `<div class="tl-seg overlap" style="position:absolute;left:${tlPct(ovStart)}%;width:${tlPct(ovEnd)-tlPct(ovStart)}%;top:0;bottom:0;z-index:2">
+        <span class="tl-name">Overlap</span><span class="tl-time">${fmtHour(ovStart)}–${fmtHour(ovEnd)}</span></div>`;
+    }
+  }
+  let outer = `<div class="tl-track">${track}</div>`;
+  outer += `<span class="tl-edge left">${fmtHour(DAY_START)}</span>`;
+  outer += `<span class="tl-edge right">${fmtHour(DAY_END)}</span>`;
+  outer += `<div class="tl-now-label" id="tl-now-label"></div><div class="tl-now" id="tl-now"></div>`;
+  el.innerHTML = outer;
+  updateShiftNow();
+}
+function updateShiftNow(){
+  const marker = document.getElementById('tl-now');
+  const label = document.getElementById('tl-now-label');
+  if(!marker) return;
+  const now = new Date();
+  const nowDec = Math.min(DAY_END, Math.max(DAY_START, now.getHours() + now.getMinutes()/60));
+  const p = tlPct(nowDec);
+  marker.style.left = p + '%';
+  if(label){
+    label.style.left = p + '%';
+    label.textContent = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  }
+}
+
+function render(){
+  if(!DATA) return;
+  renderShiftArc();
+  const wrap = document.getElementById('areas');
+  let totRun=0, totIdle=0, totPaused=0;
+
+  wrap.innerHTML = DATA.areas.map(a=>{
+    let inner, headBadge, headStat='';
+    if(!a.available){
+      headBadge = `<span class="area-badge stale">NO DATA</span>`;
+      inner = `<div class="offline">⚠ BOARD OFFLINE — no status file
+        <small>${a.age!=null ? ('last update '+humanAge(a.age)+' ago') : 'this area has never reported'}</small></div>`;
+    }else if(a.mismatch){
+      headBadge = `<span class="area-badge stale">⚠ WRONG FILE — contains ${esc(a.file_area||'?')}</span>`;
+      inner = `<div class="offline">⚠ ${esc(a.area)}_status.js holds ${esc(a.file_area||'?')} data (last written ${humanAge(a.age)} ago)
+        <small>Delete this stale file from the shared folder, or make sure the ${esc(a.label)} board writes its own ${esc(a.area)}_status.js</small></div>`;
+    }else{
+      const run = a.stations.filter(s=>s.pdo && !s.paused && s.ops>0).length;
+      const paused = a.stations.filter(s=>s.pdo && (s.paused || s.ops===0)).length;
+      const idle = a.stations.filter(s=>!s.pdo).length;
+      totRun+=run; totIdle+=idle; totPaused+=paused;
+      headStat = `<span class="area-stat">${run} running · ${paused} paused · ${idle} idle</span>`;
+      headBadge = a.stale
+        ? `<span class="area-badge stale">STALE ${humanAge(a.age)}</span>`
+        : `<span class="area-badge ok">LIVE ${humanAge(a.age)}</span>`;
+      inner = `<div class="grid">${a.stations.map(s=>stationCardHTML(s, a.overdue_grace_min)).join('')}</div>`;
+    }
+    return `<div class="area${(a.stale||a.mismatch)?' stalewrap':''}">
+      <div class="area-head">
+        <span class="area-name">${esc(a.label)}</span>
+        ${headBadge}${headStat}
+        <span class="area-line"></span>
+      </div>
+      ${inner}
+    </div>`;
+  }).join('');
+
+  // The OVERDUE pill is filled by tick(), not here: cards flip within a second
+  // of crossing the grace but this only re-renders on the 60s refresh, so
+  // counting it here would leave the pill disagreeing with the cards.
+  document.getElementById('summary').innerHTML =
+    `<span class="pill overdue" id="pill-overdue" style="display:none">OVERDUE <b>0</b></span>`
+  + `<span class="pill run">RUNNING <b>${totRun}</b></span>`
+  + `<span class="pill paused">PAUSED <b>${totPaused}</b></span>`
+  + `<span class="pill idle">IDLE <b>${totIdle}</b></span>`;
+  updateOverduePill();
+}
+
+function tick(){
+  document.getElementById('clock').textContent =
+    (DATA && DATA.server_time) ? DATA.server_time : new Date().toLocaleTimeString();
+  updateShiftNow();
+  document.querySelectorAll('.etc[data-etc]').forEach(el=>{
+    const c = fmtCountdown(el.dataset.etc, parseFloat(el.dataset.grace));
+    el.textContent = c.text;
+    el.className = 'etc ' + c.cls;
+    // Data only refreshes every 60s, so the card class has to flip here or a
+    // station would sit green for up to a minute after crossing the grace.
+    const card = el.closest('.card');
+    if(card){
+      card.classList.toggle('overdue', c.overdue);
+      if(c.overdue) card.classList.remove('run');
+      else if(!card.classList.contains('paused') && !card.classList.contains('idle'))
+        card.classList.add('run');
+    }
+  });
+  updateOverduePill();
+}
+
+// Counts the cards themselves, so the pill can never disagree with what's shown.
+function updateOverduePill(){
+  const pill = document.getElementById('pill-overdue');
+  if(!pill) return;
+  const n = document.querySelectorAll('.card.overdue').length;
+  pill.style.display = n ? '' : 'none';
+  pill.innerHTML = `OVERDUE <b>${n}</b>`;
+}
+
+function esc(s){
+  if(s===null||s===undefined) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Seamless refresh via a hidden iframe (no full-page reload = no flash) ────────
+// Re-assigning srcdoc re-navigates the hidden iframe, which re-reads the
+// *_status.js files from disk; the loaded scripts post the fresh data up here and
+// the visible page re-renders in place. The <script src> paths resolve relative
+// to this file's folder, so they must sit beside it in dashboard_status.
+const LOADER_BODY =
+  '<scr'+'ipt>window.NPV_STATUS={};</scr'+'ipt>'+
+  '<scr'+'ipt src="PK_status.js" onerror="void 0"></scr'+'ipt>'+
+  '<scr'+'ipt src="AD_status.js" onerror="void 0"></scr'+'ipt>'+
+  '<scr'+'ipt src="RP_status.js" onerror="void 0"></scr'+'ipt>'+
+  '<scr'+'ipt>parent.postMessage({__npv:1,status:window.NPV_STATUS},"*");</scr'+'ipt>';
+
+function refreshData(){
+  // The leading comment (changing each time) guarantees a fresh navigation.
+  document.getElementById('loader').srcdoc = '<!--'+Date.now()+'-->'+LOADER_BODY;
+}
+
+window.addEventListener('message', e=>{
+  if(e && e.data && e.data.__npv){
+    window.NPV_STATUS = e.data.status || {};
+    buildDATA();
+    render();
+  }
+});
+
+renderShiftArc();          // draw the timeline immediately (fallback windows)
+refreshData();             // first load
+setInterval(refreshData, 60000);
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

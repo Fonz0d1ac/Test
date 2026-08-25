@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Production — Shared Big Screen (file://)</title>
+<style>
+  html,body{margin:0;height:100%;background:#0f1117;overflow:hidden;font-family:'Segoe UI',system-ui,sans-serif}
+  /* Both reports stay loaded (and keep polling) at all times; we just fade
+     between them so there's no reload flash when it switches. */
+  .frame{position:fixed;inset:0;width:100vw;height:100vh;border:0;
+    opacity:0;transition:opacity .5s ease;pointer-events:none;z-index:1}
+  .frame.active{opacity:1;pointer-events:auto;z-index:2}
+  /* thin progress bar counting down to the next auto switch (auto mode only) */
+  .rot-bar{position:fixed;top:0;left:0;height:3px;width:0;
+    background:#34d399;box-shadow:0 0 6px #34d399;z-index:9999;transition:width .2s linear}
+  .rot-bar.off{opacity:0}
+  /* Screen selector — top-CENTER (the top-right of each report has the clock/
+     badges). Kept faintly visible + always clickable so it's reliably reachable
+     on a file:// wall screen (the full-screen iframe swallows mouse-move, so a
+     pure auto-hide could never re-appear); brightens on hover / mouse move. */
+  .ctl{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:10000;display:flex;gap:6px;
+    background:rgba(26,29,39,.82);border:1px solid #2a3342;border-radius:16px;padding:5px 6px;
+    opacity:.35;transition:opacity .3s;pointer-events:auto}
+  .ctl:hover{opacity:1}
+  .ctl.show{opacity:1}
+  .ctl button{font:600 13px/1 'Segoe UI',system-ui,sans-serif;letter-spacing:.02em;color:#aab3c5;
+    background:transparent;border:0;border-radius:12px;padding:7px 14px;cursor:pointer;white-space:nowrap}
+  .ctl button:hover{color:#f2f5fb;background:#2a3342}
+  .ctl button.active{color:#0f1117;background:#34d399}
+</style>
+</head>
+<body>
+  <iframe class="frame active" id="f0" src="shared_dashboard.html"></iframe>
+  <iframe class="frame"        id="f1" src="shared_aheadbehind.html"></iframe>
+  <div class="rot-bar" id="bar"></div>
+  <div class="ctl" id="ctl">
+    <button data-mode="0">Station</button>
+    <button data-mode="1">Ahead / Behind</button>
+    <button data-mode="auto">Auto</button>
+  </div>
+
+<script>
+const ROTATE_MS = 60000;   // auto mode: switch reports every 1 minute
+const views = [document.getElementById('f0'), document.getElementById('f1')];
+const bar = document.getElementById('bar');
+const ctl = document.getElementById('ctl');
+
+// mode: 'auto' rotates; '0'/'1' pins that screen. Remembered across reloads.
+let mode = localStorage.getItem('bigscreen_mode') || 'auto';
+let cur = 0, cycleStart = Date.now();
+
+function showView(i){ views.forEach((v,k)=> v.classList.toggle('active', k===i)); }
+
+function applyMode(){
+  document.querySelectorAll('.ctl button').forEach(b=> b.classList.toggle('active', b.dataset.mode===mode));
+  if(mode === 'auto'){
+    bar.classList.remove('off');
+  }else{
+    cur = parseInt(mode, 10) || 0;
+    showView(cur);
+    bar.classList.add('off');
+    bar.style.width = '0';
+  }
+}
+function setMode(m){
+  mode = m;
+  localStorage.setItem('bigscreen_mode', m);
+  cycleStart = Date.now();
+  applyMode();
+}
+function rotate(){
+  if(mode !== 'auto') return;
+  cur = (cur + 1) % views.length;
+  showView(cur);
+  cycleStart = Date.now();
+}
+setInterval(rotate, ROTATE_MS);
+
+// progress bar fills over the 1-minute cycle (auto mode only)
+setInterval(()=>{
+  if(mode !== 'auto'){ return; }
+  const p = Math.min(1, (Date.now() - cycleStart) / ROTATE_MS);
+  bar.style.width = (p * 100) + 'vw';
+}, 200);
+
+document.querySelectorAll('.ctl button').forEach(b=>{
+  b.addEventListener('click', ()=> setMode(b.dataset.mode));
+});
+
+// Auto-hide the selector so the wall screen stays clean; show on any mouse move.
+// The active iframe covers the whole screen and swallows the parent's mousemove,
+// so we also listen inside each (same-origin) iframe once it loads.
+let hideTimer = null;
+function showCtl(){
+  ctl.classList.add('show');
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(()=> ctl.classList.remove('show'), 3000);
+}
+window.addEventListener('mousemove', showCtl);
+views.forEach(f => f.addEventListener('load', ()=>{
+  try { f.contentWindow.addEventListener('mousemove', showCtl); } catch(e){}
+}));
+
+applyMode();
+showCtl();   // briefly reveal on load so the control is discoverable
+</script>
+</body>
+</html>
