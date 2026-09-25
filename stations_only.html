@@ -155,8 +155,9 @@ function renderCards(snap){
   (snap.workers||[]).forEach(w=>{ roster[String(w.id)]=w; });
   // Grace between ETC and "overdue" — the warehouse scans FG in some minutes
   // after the operator actually finishes. Published by app.py so this board and
-  // the control board never disagree; 20 is only a fallback for an old snapshot.
-  const graceMs = ((snap.overdue_grace_min!=null) ? snap.overdue_grace_min : 20) * 60000;
+  // the control board never disagree; the literal is only a fallback for a
+  // snapshot from a board on an older build.
+  const graceMs = ((snap.overdue_grace_min!=null) ? snap.overdue_grace_min : 30) * 60000;
 
   return (snap.stations||[]).map(sid=>{
     const cell = (snap.board||{})[sid] || {};

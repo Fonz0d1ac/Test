@@ -23,8 +23,8 @@ warnings.filterwarnings('ignore', module='openpyxl')
 # PCs are running the same version — instead of grepping the source or, worse,
 # discovering a stale PC only when a fixed bug reappears on one area. Format:
 # YYYY.MM.DD[.n] date-based; the trailing note is just a human label.
-BUILD_VERSION = '2026.08.25.12'
-BUILD_NOTE    = 'real License Plate mint (lp.py): reuse-then-mint under sp_getapplock, [License Plate] INSERT committed before printing, per-area serial ranges, live/dummy switch in print settings (defaults to dummy)'
+BUILD_VERSION = '2026.09.25.13'
+BUILD_NOTE    = 'OVERDUE scan grace 20 -> 30 min; @x standard-crew badge back on every PDO card'
 
 # ── Dev / test mode ─────────────────────────────────────────────────────────────
 # When ON, the board:
@@ -184,10 +184,16 @@ WORK_ORDER_PREFIXES = ('PDO', 'SO-')
 
 # Grace period between an order hitting its ETC and being called OVERDUE. The
 # operator finishes a box well before the warehouse pulls and scans it in as FG,
-# so a station would otherwise flash overdue for ~20 minutes on every order that
-# is actually on time. During the grace the countdown holds at 00:00; after it,
-# the order is genuinely late and the station card turns red.
-OVERDUE_GRACE_MIN = 20
+# so a station would otherwise flash overdue on every order that is actually on
+# time. During the grace the countdown holds at 00:00; after it, the order is
+# genuinely late and the station card turns red.
+#
+# THIS IS THE ONE PLACE TO CHANGE IT. The value is published in every board
+# snapshot as `overdue_grace_min`, so board.html, stations_only.html,
+# dashboard.html and shared_dashboard.html all read this number rather than
+# carrying their own. Their `DEFAULT_GRACE_MIN` constants are only the fallback
+# for a snapshot from a board still running an older build.
+OVERDUE_GRACE_MIN = 30
 DATA_START_ROW = 6
 
 # Dev mode: use uploaded files when real paths don't exist

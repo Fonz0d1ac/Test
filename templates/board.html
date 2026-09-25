@@ -121,6 +121,11 @@ select.btn{font-family:inherit;appearance:none;-webkit-appearance:none;padding-r
 .cdesc{font-size:12px;color:var(--text2);margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cmeta{display:flex;justify-content:space-between;font-size:12px;color:var(--text3);margin-bottom:3px}
 .cship{font-size:12px;color:var(--text3)}
+/* Standard crew size (TimeStudy.Ops_Qty) — the GL reads this to decide how many
+   people to put on the station, so it carries a little more weight than the rest
+   of the .cship line without shouting. */
+.cops{font-weight:700;color:var(--blue);background:var(--blue-bg);padding:0 5px;
+      border-radius:4px;cursor:help;white-space:nowrap}
 .cnote{margin-top:4px;font-size:11px;color:var(--amber);font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cprog{margin-top:6px;height:3px;border-radius:2px;background:var(--border2);overflow:hidden}
 .cprog-bar{height:100%;border-radius:2px;background:var(--green);transition:width .4s}
@@ -899,6 +904,8 @@ const I18N = {
     confirm_replace_running: 'Replace the running order with this one? The current order will move to the front of the queue.',
     note_merge_hint: 'Shown on the card as: Excel note (web note)',
     not_received: 'Not received',
+    ops_tip: 'Standard setup: {n} operator(s) for this part.\nThe ⏱ figure is hours for ONE operator — with {n} staffed, roughly {h}h.',
+    ops_tip_none: 'No time study for this part, so there is no standard operator count.',
     split_title: 'Split',
     split_add_row: '+ Add split',
     split_confirm: 'Split',
@@ -994,6 +1001,8 @@ const I18N = {
     confirm_replace_running: 'Thay đơn đang chạy bằng đơn này? Đơn hiện tại sẽ chuyển lên đầu hàng chờ.',
     note_merge_hint: 'Hiển thị trên thẻ: Ghi chú Excel (ghi chú web)',
     not_received: 'Chưa nhận hàng',
+    ops_tip: 'Định biên chuẩn: {n} người cho mã này.\nSố giờ ⏱ là giờ cho MỘT người — với {n} người, khoảng {h}h.',
+    ops_tip_none: 'Mã này chưa có time study nên không có định biên chuẩn.',
     split_title: 'Tách lệnh',
     split_add_row: '+ Thêm tách',
     split_confirm: 'Tách',
@@ -1479,6 +1488,31 @@ function formatNote(excelNote, webNote) {
   return '';
 }
 
+// Standard operator setup for a PDO — TimeStudy.Ops_Qty, carried on every PDO as
+// `ops_qty`. Rendered as `@3`: the crew this part is standard-manned with.
+//
+// Only shown when there is a REAL time study behind it. read_pdos() falls back to
+// ops_qty = 1 for a part with no TimeStudy row, and printing `@1` there would be
+// a fabricated standard rather than a missing one — so a missing study shows a
+// muted `@?` that says so on hover, matching the `⏱ 0h` the same card already shows.
+//
+// Worth stating because it looks contradictory on the card: the ⏱ hours are for a
+// SINGLE operator doing the whole order (the crew divisor was deliberately removed
+// from that figure), while @N is the standard crew. The tooltip does the division
+// so nobody has to guess which of the two numbers already accounts for the other.
+function opsTagHTML(pdo) {
+  const hasStudy = (pdo.time_study || 0) > 0;
+  if (!hasStudy) {
+    return ` &nbsp;·&nbsp; <span class="cops" style="color:var(--text3);background:none"` +
+           ` title="${esc(t('ops_tip_none'))}">@?</span>`;
+  }
+  const n = Math.max(1, pdo.ops_qty || 1);
+  const perOp = pdo.std_hours || 0;
+  const tip = t('ops_tip').replace(/\{n\}/g, n)
+                          .replace('{h}', (perOp / n).toFixed(1));
+  return ` &nbsp;·&nbsp; <span class="cops" title="${esc(tip)}">@${n}</span>`;
+}
+
 function cardHTML(pdo, assigned, station, bin, idx) {
   const p = pc(pdo);
   const note = formatNote(pdo.note, NM[pdo.id]);
@@ -1513,7 +1547,7 @@ function cardHTML(pdo, assigned, station, bin, idx) {
     <div class="cpart">${esc(pdo.part)}</div>
     <div class="cdesc" title="${esc(pdo.desc||'')}">${esc(pdo.desc||'')}</div>
     <div class="cmeta"><span>${esc(pdo.dest)}</span><span>${pdo.completed_qty} / ${pdo.qty} pcs</span></div>
-    <div class="cship">📅 ${esc(pdo.ship_date)} &nbsp;·&nbsp; ⏱ ${pdo.std_hours}h</div>
+    <div class="cship">📅 ${esc(pdo.ship_date)} &nbsp;·&nbsp; ⏱ ${pdo.std_hours}h${opsTagHTML(pdo)}</div>
     ${note?`<div class="cnote">💬 ${esc(note)}</div>`:''}
     ${prog>=0?`<div class="cprog"><div class="cprog-bar" style="width:${prog}%"></div></div>`:''}
   </div>`;
@@ -2033,9 +2067,10 @@ function startETC(elId, iso, timerKey, isDuration) {
   if(!el) return;
   // Grace between hitting ETC and being called overdue: the operator finishes a
   // box well before the warehouse pulls and scans it in as FG, so without this
-  // every on-time order flashes OVERDUE for ~20 minutes. Hold at 00:00 through
-  // the grace, then go red. Server-published so all views agree on the number.
-  const graceMs = ((BD && BD.overdue_grace_min != null) ? BD.overdue_grace_min : 20) * 60000;
+  // every on-time order flashes OVERDUE for the whole scan lag. Hold at 00:00
+  // through the grace, then go red. Server-published (app.OVERDUE_GRACE_MIN) so
+  // all views agree on the number — never hardcode it here.
+  const graceMs = ((BD && BD.overdue_grace_min != null) ? BD.overdue_grace_min : 30) * 60000;
   const col = el.closest('.scol');           // null for the queue-clear element
   const tick=()=>{
     const d=new Date(iso)-new Date(), tm=Math.floor(d/60000);

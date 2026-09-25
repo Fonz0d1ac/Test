@@ -62,7 +62,7 @@ STATION_STALE_AFTER_SEC = 30
 # finishes the box. The authoritative value is published by each board in its
 # {AREA}_status.json (app.py OVERDUE_GRACE_MIN); this is only the fallback for a
 # board still running an older build that doesn't publish it.
-DEFAULT_OVERDUE_GRACE_MIN = 20
+DEFAULT_OVERDUE_GRACE_MIN = 30
 
 def read_station_area(area):
     """Read one area's status JSON and reduce it to what the station report

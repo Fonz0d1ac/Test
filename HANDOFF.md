@@ -1,7 +1,7 @@
 # Production Control System — Full Handoff
 
 **Repo:** `Fonz0d1ac/Test` · **Branch:** `claude/production-control-board-157ift`
-**Build:** `2026.08.25.12` (`BUILD_VERSION` / `BUILD_NOTE` at the top of `app.py`, shown in the
+**Build:** `2026.09.25.13` (`BUILD_VERSION` / `BUILD_NOTE` at the top of `app.py`, shown in the
 setup window and the first console line)
 **Site:** NPV (Northstar Precision Vietnam) — Packaging / Assembly / Raw Part
 
@@ -153,6 +153,23 @@ FULL roster (each with `start`/`end`). **`_worker_available_now(w, now)` = `(sta
 ≥1 active worker; outside production it FREEZES (`off_hours`); no active worker → PAUSED. Required
 hours are per SINGLE operator; ETC scales by actual operators. Shift-boundary resets in the 60s poll.
 
+### 2g-bis. Standard crew (`ops_qty`) and the `@x` card badge (build `.13`)
+`TimeStudy.Ops_Qty` → `p['ops_qty']` on every PDO (splits inherit it via `dict(parent_static)`),
+and it rides to the client untouched — `build_board_snapshot` embeds the raw `_pdo_cache` dicts, so
+nothing server-side had to change to bring the badge back. It renders as **`@3`** on the `.cship`
+line of every PDO card, via `opsTagHTML()` in `board.html`.
+
+⚠ **The two numbers on that line answer different questions, and it looks contradictory:**
+`⏱ 12.6h` is hours for a **SINGLE** operator to do the whole order (the crew divisor was
+deliberately removed from that figure — §2g), while `@3` is the **standard crew**. The badge's
+tooltip does the division (`12.6h @3 → ~4.2h`) so nobody has to guess which number already accounts
+for the other. Keep that tooltip if you touch this.
+
+⚠ **A part with no TimeStudy row shows `@?`, not `@1`.** `read_pdos()` falls back to `ops_qty = 1`
+for an unmatched part, so keying the badge off `ops_qty` alone would print a fabricated standard
+rather than a missing one. `opsTagHTML()` gates on `time_study > 0` — the same condition that makes
+the card show `⏱ 0h` — so the two read consistently.
+
 ### 2h. License Plate auto-queue — SELF-HEALING
 `auto_queue_from_license_plate()` places a printed PO on its station iff it is (1) active/unfinished
 (`remaining > 0`), (2) not already on the board, (3) not manually removed
@@ -193,13 +210,16 @@ would consume real serials while skipping the INSERT that records them. See guar
 - Matching is **case-insensitive**: a lowercase `so-1234` vanishing silently is far worse than a
   stray match, which the area / qty>0 / ship-date checks drop anyway.
 
-**`OVERDUE_GRACE_MIN = 20`** — the warehouse pulls and scans FG in ~20 min after the operator
-actually finishes the box, so without a grace every on-time order flashed OVERDUE for 20 minutes.
-Past ETC the countdown **holds at `00:00`**; only after the grace does it read **OVERDUE** and turn
-the station card **red**.
+**`OVERDUE_GRACE_MIN = 30`** (20 through `.12`; raised in `.13`) — the warehouse pulls and scans FG
+some minutes after the operator actually finishes the box, so without a grace every on-time order
+flashed OVERDUE for that whole lag. Past ETC the countdown **holds at `00:00`**; only after the
+grace does it read **OVERDUE** and turn the station card **red**.
 - Published in the board snapshot as **`overdue_grace_min`** so `board.html`, `stations_only.html`,
-  `dashboard.html` and `shared_dashboard.html` all read ONE number. Change it in `app.py`, not in
-  each HTML file; the HTML falls back to 20 only for an old snapshot.
+  `dashboard.html` and `shared_dashboard.html` all read ONE number. **Change it in `app.py`, not in
+  each HTML file.** The views' `DEFAULT_GRACE_MIN` (and `combined_dashboard`'s
+  `DEFAULT_OVERDUE_GRACE_MIN`) are only the fallback for a snapshot from a board on an older build.
+  They were moved 20 → 30 alongside in `.13` so a stale board and a current one cannot disagree —
+  but they are still not the value to edit when changing behaviour.
 - Only the **in-progress ETC** colours a station — a long `queue_clear` must not (`isDuration`
   guard in `startETC`).
 - A **paused** timer is frozen, so it can never be overdue. Every view checks this (§6.19).
@@ -628,6 +648,8 @@ Answered by assumption, stated out loud rather than left blocking:
   starts consuming production serials on three PCs at once.
 - **The BPT spools in the background.** The operator needs to *know* it printed, not *watch* it.
 - **`overdue_grace_min` is published by the server**, so five views cannot drift apart.
+- **`@x` is gated on the time study, not on `ops_qty`** — a fabricated standard crew is worse than
+  a visibly absent one, because a GL would staff to it.
 - **Why LP auto-queue stays** (§2h): after the real mint lands it stops being a *rival* placement
   signal and becomes the **recovery layer over the same source of truth**. Direct placement is a
   one-shot write to `assignments_{AREA}.json`; auto-queue re-derives from SQL every 60 s, so a lost
@@ -652,6 +674,7 @@ Answered by assumption, stated out loud rather than left blocking:
 | `.9` | Printing **~14× faster** ZPL + lossless ZPL compression (7029→835 KB); warm MainDatabase; simplex BPT; ticket layout rework (banner, barcodes, `PDO:`, pallet tag); per-stage timings. |
 | `.10` | **BPT spools in the background** (9.91 s → 0.05 s response); persistent + prewarmed browser profile; lean headless flags; render/spool split in the logs. |
 | `.11` | **`SO-` work orders** alongside `PDO`; **20-minute scan grace** before OVERDUE, with the station card turning red — applied to the control board, wall board, big screen and shared viewer. |
+| `.13` | **OVERDUE grace 20 → 30 min** (`app.OVERDUE_GRACE_MIN` + the four fallbacks). **`@x` standard-crew badge back on every PDO card** — `TimeStudy.Ops_Qty`, which was already published in the snapshot and only missing from the UI. |
 | `.12` | **Real License Plate mint** (`lp.py`): reuse-then-mint, `sp_getapplock` + read-back retry, `[License Plate]` INSERT **committed before printing**, per-area serial ranges (the hardcoded Packaging base is gone), `lp_mode` live/dummy switch per area **defaulting to dummy**, `_license_plate_cache` seeded at print time. |
 
 Also this session: `stations_only.html` reworked into a **two-area (PK + RP) wall board** with
@@ -667,7 +690,7 @@ plus a `scale()` backstop). All missing templates and shared viewers restored to
 - `DEV_MODE` — from `BOARD_DEV_MODE`; setup-window checkbox overrides.
 - `EXCEL_PLAN` / attendance paths — overridden by the setup window / `startup_config.json`.
 - `PLAN_SHEET='1.FollowPlanForGL'`, `DATA_START_ROW=6`.
-- `WORK_ORDER_PREFIXES = ('PDO','SO-')`, `OVERDUE_GRACE_MIN = 20`.
+- `WORK_ORDER_PREFIXES = ('PDO','SO-')`, `OVERDUE_GRACE_MIN = 30`.
 - SQL: `SQL_SERVER='VTN1PRDSQL002'`, `UID='svcsqllocal'`, `PWD='KetnoilocalApp'`,
   `SQL_DB_TECH='TECH_DATA'`, `SQL_DB_PROD='LOCALNPV'`. `svcsqllocal` already has INSERT on
   `[License Plate]` (the macro proves it).
@@ -695,7 +718,7 @@ plus a `scale()` backstop). All missing templates and shared viewers restored to
 
 ### `combined_dashboard.py`
 - Own `SQL_CONN_STR` (ODBC Driver 17), `CAPACITY_FILES`, `DASHBOARD_STATUS_DIR`,
-  `DEFAULT_OVERDUE_GRACE_MIN = 20` (fallback only — the authoritative value comes from each board's
+  `DEFAULT_OVERDUE_GRACE_MIN = 30` (fallback only — the authoritative value comes from each board's
   snapshot), `PORT = 8080`.
 - Carries its **own** shift/break model (`SHIFTS`, `parse_capacity_file`) that overlaps `app.py`'s
   capacity code but is not identical — aggregate capacity for the chart vs per-worker roster.
