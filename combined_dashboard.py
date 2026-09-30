@@ -64,6 +64,44 @@ STATION_STALE_AFTER_SEC = 30
 # board still running an older build that doesn't publish it.
 DEFAULT_OVERDUE_GRACE_MIN = 30
 
+# [Earned hour] is an nvarchar column on BOTH FG_Database_All and
+# Nhaplecuoingay_All, so it can hold anything an operator or an upstream tool
+# put there: '', ' ', 'N/A', '-', or a comma decimal ('1,5'). The SQL side now
+# uses TRY_CAST so one such row cannot kill a whole query (error 8114,
+# "Error converting data type nvarchar to float"); this is the Python-side
+# equivalent for the paths that read the column raw and convert here.
+#
+# float('') raises ValueError, and float(None) raises TypeError — the old
+# `float(x) if x else 0` guarded None and '' but still died on 'N/A'.
+_bad_earned_seen = set()
+
+def _f(v, default=0.0, label=''):
+    """Best-effort float. Never raises. Remembers junk values so they can be
+    reported once instead of silently becoming 0 forever."""
+    if v is None:
+        return default
+    if isinstance(v, (int, float)):
+        return float(v)
+    t = str(v).strip()
+    if not t:
+        return default
+    try:
+        return float(t)
+    except ValueError:
+        pass
+    # Tolerate a comma decimal separator ('1,5') — common when a locale-set
+    # Excel or a hand edit writes into a text column.
+    try:
+        return float(t.replace(',', '.'))
+    except ValueError:
+        key = (label, t[:40])
+        if key not in _bad_earned_seen:
+            _bad_earned_seen.add(key)
+            print(f"[data] non-numeric {label or 'value'} {t[:40]!r} — counted as "
+                  f"{default}. Fix the row in SQL; this warning prints once per value.")
+        return default
+
+
 def read_station_area(area):
     """Read one area's status JSON and reduce it to what the station report
     shows. Never raises — a missing/locked/half-written file degrades to an
@@ -655,7 +693,7 @@ def get_earned_hours(target_date):
         # These are boxes still in progress, logged at end of shift.
         # Their earned hours count toward today's total and appear on the chart.
         cursor.execute("""
-            SELECT [Input time], CAST([Earned hour] AS float) AS earned, Station, [License Plate]
+            SELECT [Input time], TRY_CAST([Earned hour] AS float) AS earned, Station, [License Plate]
             FROM [dbo].[Nhaplecuoingay_All]
             WHERE CAST([Production date] AS DATE) = ?
             ORDER BY [Input time]
@@ -667,7 +705,7 @@ def get_earned_hours(target_date):
         # not the sum of all entries. The latest entry represents the
         # most recent WIP state for that box.
         cursor.execute("""
-            SELECT w.[License Plate], CAST(w.[Earned hour] AS float) AS earned
+            SELECT w.[License Plate], TRY_CAST(w.[Earned hour] AS float) AS earned
             FROM [dbo].[Nhaplecuoingay_All] w
             INNER JOIN (
                 SELECT [License Plate], MAX([Production date]) AS max_date
@@ -690,7 +728,7 @@ def get_earned_hours(target_date):
     prior_wip = {}
     for row in wip_prior_rows:
         lp = str(row[0]).strip()
-        hours = float(row[1]) if row[1] else 0
+        hours = _f(row[1], label='WIP [Earned hour]')
         prior_wip[lp] = hours
 
     # Today's FG License Plates
@@ -714,7 +752,11 @@ def get_earned_hours(target_date):
     # FG entries
     for row in fg_rows:
         input_time = row[0]
-        earned = float(row[1]) if row[1] else 0
+        # Read raw from SQL (no CAST on this one), so a non-numeric cell arrives
+        # here as a string. The old `float(x) if x else 0` survived '' and NULL
+        # but raised ValueError on 'N/A' — a different symptom of the same bad row
+        # that aborts the TRY_CAST queries.
+        earned = _f(row[1], label='FG [Earned hour]')
         station = str(row[2]).strip() if row[2] else ""
         lp = str(row[4]).strip() if row[4] else ""
 
@@ -744,7 +786,7 @@ def get_earned_hours(target_date):
     wip_area = {"AD": 0, "PK": 0, "RP": 0}
     for row in wip_today_rows:
         input_time = row[0]
-        earned = float(row[1]) if row[1] else 0
+        earned = _f(row[1], label='WIP [Earned hour]')
         station = str(row[2]).strip() if row[2] else ""
         lp = str(row[3]).strip() if row[3] else ""
 
@@ -798,7 +840,7 @@ def get_earned_hours(target_date):
             "part": part_no,
         })
 
-    raw_fg_total = sum(float(r[1]) for r in fg_rows if r[1])
+    raw_fg_total = sum(_f(r[1], label='FG [Earned hour]') for r in fg_rows)
     net_fg_total = cumulative - wip_total
     net_total = cumulative
 
@@ -961,12 +1003,17 @@ def build_station_cycle_model():
                     ELSE '18-23'
                 END AS bracket,
                 AVG(CAST(t.gap_minutes AS float))  AS avg_minutes,
-                AVG(CAST(t.[Earned hour] AS float)) AS avg_earned,
+                AVG(t.[Earned hour])                AS avg_earned,
                 COUNT(*)                            AS scan_count
             FROM (
                 SELECT
                     Station, [Part no], [Input time],
-                    CAST([Earned hour] AS float) AS [Earned hour],
+                    -- TRY_CAST, not CAST: [Earned hour] is nvarchar, and ONE
+                    -- non-numeric row anywhere in the 30-day window used to abort
+                    -- this entire query with SQL error 8114. TRY_CAST makes that
+                    -- row NULL instead, and AVG ignores NULLs — so the model is
+                    -- built from the good rows rather than not built at all.
+                    TRY_CAST([Earned hour] AS float) AS [Earned hour],
                     DATEDIFF(minute,
                         LAG([Input time]) OVER (
                             PARTITION BY Station, CAST([Production date] AS DATE)
@@ -987,6 +1034,33 @@ def build_station_cycle_model():
                 END
         """, start_date)
         rows = cursor.fetchall()
+
+        # Now that TRY_CAST stops a bad row from aborting the query, SAY SO when
+        # there is one. Silently scoring junk as NULL would quietly under-report
+        # earned hours on an efficiency dashboard — the exact number the screen
+        # exists to show — and nobody would ever go fix the source row.
+        # One extra scan per hourly rebuild.
+        try:
+            cursor.execute("""
+                SELECT TOP 5 [Earned hour] AS bad_value, COUNT(*) AS n
+                FROM [dbo].[FG_Database_All]
+                WHERE CAST([Production date] AS DATE) >= ?
+                  AND [Earned hour] IS NOT NULL
+                  AND LTRIM(RTRIM(CAST([Earned hour] AS nvarchar(50)))) <> ''
+                  AND TRY_CAST([Earned hour] AS float) IS NULL
+                GROUP BY [Earned hour]
+                ORDER BY COUNT(*) DESC
+            """, start_date)
+            bad = cursor.fetchall()
+            if bad:
+                detail = ', '.join(f"{str(b[0])[:20]!r} x{b[1]}" for b in bad)
+                print(f"[StationModel] WARNING: FG_Database_All has non-numeric "
+                      f"[Earned hour] values in the last 30 days — {detail}. "
+                      f"Those scans are EXCLUDED from the pace model and count as 0 "
+                      f"earned hours. Fix them in SQL; the model is otherwise fine.")
+        except Exception as de:
+            print(f"[StationModel] (bad-value check skipped: {de})")
+
         conn.close()
     except Exception as e:
         print(f"[StationModel] Build error: {e}")
@@ -998,9 +1072,13 @@ def build_station_cycle_model():
         part = str(row[1]).strip()
         bracket = str(row[2]).strip()
         key = (station, part, bracket)
+        # avg_earned can be NULL when EVERY row in this station/part/bracket
+        # group failed TRY_CAST — float(None) would just move the crash from SQL
+        # into Python. avg_minutes is non-NULL (gap_minutes is filtered 5..240),
+        # but it costs nothing to read it the same safe way.
         model[key] = {
-            "avg_minutes": float(row[3]),
-            "avg_earned":  float(row[4]),
+            "avg_minutes": _f(row[3]),
+            "avg_earned":  _f(row[4]),
             "count":       int(row[5]),
         }
     print(f"[StationModel] Built {len(model)} station/part/bracket combinations")

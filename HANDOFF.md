@@ -1,7 +1,7 @@
 # Production Control System — Full Handoff
 
 **Repo:** `Fonz0d1ac/Test` · **Branch:** `claude/production-control-board-157ift`
-**Build:** `2026.09.25.13` (`BUILD_VERSION` / `BUILD_NOTE` at the top of `app.py`, shown in the
+**Build:** `2026.09.30.14` (`BUILD_VERSION` / `BUILD_NOTE` at the top of `app.py`, shown in the
 setup window and the first console line)
 **Site:** NPV (Northstar Precision Vietnam) — Packaging / Assembly / Raw Part
 
@@ -674,6 +674,7 @@ Answered by assumption, stated out loud rather than left blocking:
 | `.9` | Printing **~14× faster** ZPL + lossless ZPL compression (7029→835 KB); warm MainDatabase; simplex BPT; ticket layout rework (banner, barcodes, `PDO:`, pallet tag); per-stage timings. |
 | `.10` | **BPT spools in the background** (9.91 s → 0.05 s response); persistent + prewarmed browser profile; lean headless flags; render/spool split in the logs. |
 | `.11` | **`SO-` work orders** alongside `PDO`; **20-minute scan grace** before OVERDUE, with the station card turning red — applied to the control board, wall board, big screen and shared viewer. |
+| `.14` | **`combined_dashboard.py` crash fix** — `[Earned hour]` is nvarchar; one non-numeric row in the 30-day window aborted `build_station_cycle_model` with SQL error 8114. `TRY_CAST` + a safe `_f()` on the Python side + a warning that names the bad values (§2l). |
 | `.13` | **OVERDUE grace 20 → 30 min** (`app.OVERDUE_GRACE_MIN` + the four fallbacks). **`@x` standard-crew badge back on every PDO card** — `TimeStudy.Ops_Qty`, which was already published in the snapshot and only missing from the UI. |
 | `.12` | **Real License Plate mint** (`lp.py`): reuse-then-mint, `sp_getapplock` + read-back retry, `[License Plate]` INSERT **committed before printing**, per-area serial ranges (the hardcoded Packaging base is gone), `lp_mode` live/dummy switch per area **defaulting to dummy**, `_license_plate_cache` seeded at print time. |
 
@@ -752,6 +753,39 @@ plus a `scale()` backstop). All missing templates and shared viewers restored to
    kill the six plaintext D365 passwords regardless.
 7. Optional: a **module build-stamp check** at startup so a half-copied update announces itself
    (much less pressing now that `git pull` is atomic).
+
+---
+
+### 2l. `[Earned hour]` is nvarchar — never hard-CAST it (build `.14`)
+On **both** `FG_Database_All` and `Nhaplecuoingay_All`, `[Earned hour]` is an **nvarchar** column,
+so it can hold `''`, `'   '`, `'N/A'`, `'-'`, or a comma decimal `'1,5'`. A single such row inside a
+query's window aborts the WHOLE query:
+
+```
+('42000', '[Microsoft][ODBC Driver 17 for SQL Server][SQL Server]
+ Error converting data type nvarchar to float. (8114)')
+```
+
+This bit `build_station_cycle_model()` in `combined_dashboard.py`, whose window is **30 days** — so
+it is time-bombed by design: a bad row breaks it for 30 days, it heals itself, and it comes back
+the next time someone types junk. Three other queries read the same column with the same exposure.
+
+**Rules:**
+- **SQL side: always `TRY_CAST([Earned hour] AS float)`, never `CAST`.** TRY_CAST yields NULL, and
+  `AVG`/`SUM` ignore NULLs, so the model is built from the good rows instead of not at all.
+- **Python side: always `_f(value, label=…)`, never bare `float()`.** The FG "today" path reads the
+  column RAW, so a bad cell arrives as a Python string — the old `float(x) if x else 0` survived
+  `NULL` and `''` but raised **ValueError** on `'N/A'`. Same bad row, different symptom.
+- **After a TRY_CAST, guard the Python read too.** `AVG` over a group whose rows ALL failed returns
+  NULL, and `float(None)` merely moves the crash from SQL into Python.
+- **Say something.** `_f()` prints once per distinct junk value, and the model build prints a
+  `[StationModel] WARNING` naming the offending values. Silently scoring junk as 0 under-reports
+  earned hours — the exact number the screen exists to show — and nobody would ever fix the source.
+
+⚠ `[Production date]` is still hard-`CAST(... AS DATE)` in the same queries. It is a different error
+(241, not 8114) and has never fired, so it was left alone deliberately: `TRY_CAST` there would
+silently drop rows from the window rather than fail loudly. If it ever does fire, that is the
+decision to revisit.
 
 ---
 

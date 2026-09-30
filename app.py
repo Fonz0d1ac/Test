@@ -23,8 +23,8 @@ warnings.filterwarnings('ignore', module='openpyxl')
 # PCs are running the same version — instead of grepping the source or, worse,
 # discovering a stale PC only when a fixed bug reappears on one area. Format:
 # YYYY.MM.DD[.n] date-based; the trailing note is just a human label.
-BUILD_VERSION = '2026.09.25.13'
-BUILD_NOTE    = 'OVERDUE scan grace 20 -> 30 min; @x standard-crew badge back on every PDO card'
+BUILD_VERSION = '2026.09.30.14'
+BUILD_NOTE    = 'combined_dashboard: [Earned hour] is nvarchar - TRY_CAST + safe float so one junk row cannot abort the station pace model (SQL 8114)'
 
 # ── Dev / test mode ─────────────────────────────────────────────────────────────
 # When ON, the board:
