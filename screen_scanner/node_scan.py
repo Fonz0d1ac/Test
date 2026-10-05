@@ -11,6 +11,7 @@ afterwards; moving it is fine. If you resize it, redo snip and calibrate.
   python node_scan.py check 312 930            detect on the current screen, save check.png
   python node_scan.py scan 200 800 400 1000    scan X 200..400, Y 800..1000, save nodes.json
   python node_scan.py scan ... --loop 10       re-scan every 10 minutes
+  python node_scan.py scan ... --target gem    look for targets/gem.png instead (own nodes_gem.json)
 
 Emergency stop: push the mouse into the top-left corner of the screen.
 """
@@ -30,7 +31,7 @@ from screen_scan import ScreenCapture
 
 HERE = Path(__file__).parent.resolve()
 CONFIG_FILE = HERE / 'scan_config.json'
-NODES_FILE = HERE / 'nodes.json'
+NODES_DIR = HERE  # results go in nodes_<target>.json here
 
 CONFIG_VERSION = 3
 DEFAULTS = {
@@ -312,8 +313,29 @@ def countdown(seconds: int, msg: str) -> None:
 
 # ---------- node list ----------
 
-def load_nodes() -> list:
-    return json.loads(NODES_FILE.read_text()) if NODES_FILE.exists() else []
+def nodes_file(target_path: Path) -> Path:
+    """Each target keeps its own results, so scanning for one never marks
+    another's nodes as gone."""
+    return NODES_DIR / f'nodes_{target_path.stem}.json'
+
+
+def load_nodes(path: Path) -> list:
+    return json.loads(path.read_text()) if path.exists() else []
+
+
+def load_target(cfg: dict, args) -> tuple:
+    """Target image from --target NAME (targets/NAME.png, or a .png path) or the
+    config, plus --threshold if given. Returns (image, path)."""
+    name = getattr(args, 'target', None) or cfg['target']
+    path = Path(name) if name.lower().endswith('.png') else Path('targets') / f'{name}.png'
+    if not path.is_absolute():
+        path = HERE / path
+    img = cv2.imread(str(path))
+    if img is None:
+        sys.exit(f'No target image at {path}. Create it with: python screen_scan.py snip {path.stem}')
+    if getattr(args, 'threshold', None):
+        cfg['threshold'] = args.threshold
+    return img, path
 
 
 def merge(nodes: list, x: int, y: int, score: float, now: str) -> bool:
@@ -387,11 +409,10 @@ def cmd_calibrate(cfg: dict, args) -> None:
 
 def cmd_check(cfg: dict, args) -> None:
     need(cfg, calibration=True)
-    target = cv2.imread(str(HERE / cfg['target']))
-    if target is None:
-        sys.exit(f'No target image at {cfg["target"]}. Create it with: python screen_scan.py snip cropland')
+    target, target_path = load_target(cfg, args)
     if not cfg.get('perspective'):
         print('Note: no camera-tilt measurement yet; run "calibrate" again for accurate coordinates.')
+    print(f'Looking for {target_path.stem} (threshold {cfg["threshold"]})')
     countdown(3, 'focus the game, capturing in')
     with ScreenCapture() as sct:
         screen = grab_game(sct, cfg)
@@ -425,7 +446,7 @@ def cmd_check(cfg: dict, args) -> None:
         os.startfile(out)  # open it in the default image viewer
 
 
-def scan_pass(cfg: dict, args, target: np.ndarray, sct) -> None:
+def scan_pass(cfg: dict, args, target: np.ndarray, sct, results: Path) -> None:
     step = cfg['step']
     xs = list(range(args.x1, args.x2 + 1, step))
     ys = list(range(args.y1, args.y2 + 1, step))
@@ -434,7 +455,7 @@ def scan_pass(cfg: dict, args, target: np.ndarray, sct) -> None:
         xs.append(args.x2)
     if args.y2 - ys[-1] > step / 2:
         ys.append(args.y2)
-    nodes = load_nodes()
+    nodes = load_nodes(results)
     start = datetime.now().isoformat(timespec='seconds')
     print(f'\n[{start}] Scanning {len(xs) * len(ys)} points...')
     for row, y in enumerate(ys):
@@ -444,7 +465,7 @@ def scan_pass(cfg: dict, args, target: np.ndarray, sct) -> None:
             for nx, ny, score, *_ in detect(cfg, grab_game(sct, cfg), target, x, y, step):
                 if merge(nodes, nx, ny, score, now):
                     print(f'  NEW  X:{nx} Y:{ny}  (score {score:.2f})')
-            NODES_FILE.write_text(json.dumps(nodes, indent=2))
+            results.write_text(json.dumps(nodes, indent=2))
 
     # drop nodes inside the scanned area that were not seen this pass
     half = step / 2
@@ -453,22 +474,26 @@ def scan_pass(cfg: dict, args, target: np.ndarray, sct) -> None:
     for n in gone:
         print(f'  GONE X:{n["x"]} Y:{n["y"]}')
     nodes = [n for n in nodes if n not in gone]
-    NODES_FILE.write_text(json.dumps(nodes, indent=2))
-    print(f'Pass done: {len(nodes)} nodes in {NODES_FILE.name}')
+    results.write_text(json.dumps(nodes, indent=2))
+    print(f'Pass done: {len(nodes)} nodes in {results.name}')
 
 
 def cmd_scan(cfg: dict, args) -> None:
     need(cfg, points=True, calibration=True)
-    target = cv2.imread(str(HERE / cfg['target']))
-    if target is None:
-        sys.exit(f'No target image at {cfg["target"]}. Create it with: python screen_scan.py snip cropland')
+    target, target_path = load_target(cfg, args)
+    results = nodes_file(target_path)
+    legacy = NODES_DIR / 'nodes.json'  # before per-target files, everything went here
+    if legacy.exists() and not results.exists() and target_path.stem == 'cropland':
+        legacy.rename(results)
+        print(f'Moved nodes.json to {results.name}.')
+    print(f'Looking for {target_path.stem}; results in {results.name}')
     args.x1, args.x2 = sorted((args.x1, args.x2))
     args.y1, args.y2 = sorted((args.y1, args.y2))
     countdown(3, 'focus the game, starting in')
     with ScreenCapture() as sct:
         while True:
             t0 = time.monotonic()
-            scan_pass(cfg, args, target, sct)
+            scan_pass(cfg, args, target, sct, results)
             if not args.loop:
                 return
             wait = args.loop * 60 - (time.monotonic() - t0)
@@ -477,6 +502,12 @@ def cmd_scan(cfg: dict, args) -> None:
             while time.monotonic() < end:
                 check_stop()
                 time.sleep(0.5)
+
+
+def target_options(p) -> None:
+    p.add_argument('--target', metavar='NAME',
+                   help='look for targets/NAME.png instead of the config\'s target')
+    p.add_argument('--threshold', type=float, help='match score for this run (default from config)')
 
 
 def main() -> int:
@@ -491,9 +522,12 @@ def main() -> int:
         s.add_argument('y', type=int)
         if name == 'calibrate':
             s.add_argument('--d', type=int, default=4, help='tiles to move per axis (default 4)')
+        if name == 'check':
+            target_options(s)
     s = sub.add_parser('scan', help='scan the rectangle X1,Y1 - X2,Y2')
     for a in ('x1', 'y1', 'x2', 'y2'):
         s.add_argument(a, type=int)
+    target_options(s)
     s.add_argument('--loop', type=float, metavar='MIN', help='repeat a full pass every MIN minutes')
     args = p.parse_args()
 
