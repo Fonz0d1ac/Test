@@ -1,3 +1,6 @@
 scan_log.csv
 targets/*.png
 zoom_shots/
+scan_config.json
+nodes.json
+check.png
