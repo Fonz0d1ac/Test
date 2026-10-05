@@ -40,6 +40,8 @@ DEFAULTS = {
     'threshold': 0.9,    # croplands score ~0.95+, food nodes (no shield) up to ~0.85
     'scales': [0.75, 1.35],  # sprite size range searched, relative to the target image
     'load_wait': 1.2,    # seconds after a jump before taking the screenshot
+    'popup_wait': 3.0,   # longest to wait for the search popup to open
+    'click_wait': 0.3,   # pause after each click and after typing
     'step': 16,          # map tiles between scan points
     'tile_offset': [0, 0],  # added to every result, to correct a constant error
     'window_points': {},  # search_button, x_field, y_field, go_button (px inside the game window)
@@ -201,6 +203,30 @@ def click_point(cfg: dict, name: str) -> None:
     wi.click(left + x, top + y)
 
 
+_patch_sct = None
+
+
+def patch_at(cfg: dict, name: str) -> np.ndarray:
+    """Small screenshot around one of the recorded points."""
+    global _patch_sct
+    if _patch_sct is None:
+        _patch_sct = ScreenCapture()
+    left, top, _, _ = wi.client_rect(cfg['window_title'])
+    x, y = cfg['window_points'][name]
+    shot = _patch_sct.grab({'left': left + x - 30, 'top': top + y - 12, 'width': 60, 'height': 24})
+    return np.asarray(shot)[:, :, :3].astype(np.int16)
+
+
+def wait_for_change(cfg: dict, name: str, before: np.ndarray, timeout: float) -> bool:
+    """Poll until the area around a point looks different (e.g. a popup opened there)."""
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        time.sleep(0.1)
+        if np.abs(patch_at(cfg, name) - before).mean() > 20:
+            return True
+    return False
+
+
 # ---------- game actions ----------
 
 def check_stop() -> None:
@@ -211,17 +237,28 @@ def check_stop() -> None:
 
 def goto(cfg: dict, x: int, y: int) -> None:
     """Jump the map centre to (x, y) through the coordinate search popup."""
-    check_stop()
-    click_point(cfg, 'search_button')
-    time.sleep(0.5)
+    wait = cfg['click_wait']
+    for attempt in range(2):
+        check_stop()
+        before = patch_at(cfg, 'x_field')
+        click_point(cfg, 'search_button')
+        # wait until the popup's X box actually appears instead of guessing a delay
+        if wait_for_change(cfg, 'x_field', before, cfg['popup_wait']):
+            break
+        if attempt == 0:
+            print('  search popup did not open, clicking the magnifier again...')
+    else:
+        raise RuntimeError('The search popup did not open. Check the game window is in front, '
+                           'the UI is hidden, and re-run "setup" if the window layout changed.')
+    time.sleep(wait)  # let the popup finish its opening animation
     for field, value in (('x_field', x), ('y_field', y)):
         check_stop()
         click_point(cfg, field)
-        time.sleep(0.15)
+        time.sleep(wait)
         wi.press(wi.VK_END)
         wi.press(wi.VK_BACK, 6)
         wi.type_digits(str(value))
-        time.sleep(0.1)
+        time.sleep(wait)
     check_stop()
     click_point(cfg, 'go_button')
     time.sleep(cfg['load_wait'])
