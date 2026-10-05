@@ -32,18 +32,20 @@ HERE = Path(__file__).parent.resolve()
 CONFIG_FILE = HERE / 'scan_config.json'
 NODES_FILE = HERE / 'nodes.json'
 
-CONFIG_VERSION = 2
+CONFIG_VERSION = 3
 DEFAULTS = {
     'version': CONFIG_VERSION,
     'window_title': 'Rise of Kingdoms',
     'target': 'targets/cropland.png',
-    'threshold': 0.92,   # food nodes look similar and score ~0.85
+    'threshold': 0.9,    # croplands score ~0.95+, food nodes (no shield) up to ~0.85
+    'scales': [0.75, 1.35],  # sprite size range searched, relative to the target image
     'load_wait': 1.2,    # seconds after a jump before taking the screenshot
     'step': 16,          # map tiles between scan points
     'tile_offset': [0, 0],  # added to every result, to correct a constant error
     'window_points': {},  # search_button, x_field, y_field, go_button (px inside the game window)
-    'vx': None,          # screen px moved per +1 map X
-    'vy': None,          # screen px moved per +1 map Y
+    'vx': None,          # screen px moved per +1 map X, at the middle of the window
+    'vy': None,          # screen px moved per +1 map Y, at the middle of the window
+    'perspective': None,  # how fast things grow per px further down the window (tilted camera)
 }
 POINTS = [
     ('search_button', 'the magnifying glass on the coordinate bar (top left)'),
@@ -64,13 +66,21 @@ def load_config() -> dict:
     cfg = dict(DEFAULTS)
     if CONFIG_FILE.exists():
         saved = json.loads(CONFIG_FILE.read_text())
-        if saved.get('version', 1) < 2:
-            # v1 measured from the whole monitor: drop its screen positions and old threshold
-            for key in ('points', 'monitor', 'center', 'threshold', 'version'):
+        version = saved.get('version', 1)
+        if version < 2:
+            # v1 measured from the whole monitor: drop its screen positions
+            for key in ('points', 'monitor', 'center'):
                 saved.pop(key, None)
-            print('Config updated: positions are now relative to the game window. '
-                  'Run "setup" again (calibration is kept).')
+            print('Config updated: click positions are now relative to the game window. '
+                  'Run "setup" again.')
+        if version < 3:
+            # old defaults; v3 adds perspective, so calibrate again
+            for key in ('threshold', 'tile_offset', 'version'):
+                saved.pop(key, None)
+            print('Config updated: run "calibrate" again to measure the camera tilt.')
         cfg.update(saved)
+        if version < CONFIG_VERSION:
+            save_config(cfg)
     return cfg
 
 
@@ -95,12 +105,30 @@ def whiteness(img: np.ndarray) -> np.ndarray:
     return img.min(axis=2)
 
 
-def find_all(screen: np.ndarray, target: np.ndarray, threshold: float) -> list:
-    """Every match of target (both BGR) above threshold: [(score, cx, cy)]."""
-    r = cv2.matchTemplate(whiteness(screen), whiteness(target), cv2.TM_CCOEFF_NORMED)
-    th, tw = target.shape[:2]
-    peaks = (r >= threshold) & (r == cv2.dilate(r, np.ones((th, tw), np.uint8)))
-    return [(float(r[y, x]), x + tw // 2, y + th // 2) for y, x in zip(*np.nonzero(peaks))]
+def find_all(screen: np.ndarray, target: np.ndarray, threshold: float, scales=(1, 1)) -> list:
+    """Every match of target (both BGR) above threshold, trying sizes from
+    scales[0] to scales[1] (the tilted camera draws sprites lower on the screen
+    bigger). Returns [(score, cx, cy, scale)], best match per spot."""
+    screen_w = whiteness(screen)
+    lo, hi = scales
+    candidates = []
+    for s in np.arange(lo, hi + 1e-9, 0.05) if hi > lo else [lo]:
+        t = cv2.resize(target, None, fx=s, fy=s,
+                       interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_LINEAR)
+        th, tw = t.shape[:2]
+        if th > screen.shape[0] or tw > screen.shape[1]:
+            continue
+        r = cv2.matchTemplate(screen_w, whiteness(t), cv2.TM_CCOEFF_NORMED)
+        peaks = (r >= threshold) & (r == cv2.dilate(r, np.ones((th, tw), np.uint8)))
+        candidates += [(float(r[y, x]), x + tw // 2, y + th // 2, float(s))
+                       for y, x in zip(*np.nonzero(peaks))]
+    # one result per spot: keep the best-scoring size
+    radius = max(target.shape[:2]) * lo * 0.6
+    kept = []
+    for c in sorted(candidates, reverse=True):
+        if all(abs(c[1] - k[1]) > radius or abs(c[2] - k[2]) > radius for k in kept):
+            kept.append(c)
+    return kept
 
 
 def screen_center(screen: np.ndarray) -> tuple:
@@ -110,10 +138,34 @@ def screen_center(screen: np.ndarray) -> tuple:
 
 
 def pixel_to_tile(cfg: dict, center_px: tuple, px: tuple) -> tuple:
-    """Map-tile offset (dX, dY) of a screen pixel relative to the screen centre."""
+    """Map-tile offset (dX, dY) of a screen pixel relative to the screen centre.
+
+    The camera is tilted, so the ground is drawn bigger lower on the screen:
+    k(y) = 1 + c * (y - centre) is the size there relative to the middle. Across
+    the screen, tiles scale by k; down the screen, by k squared. Undo that, then
+    use the vx/vy measured at the middle."""
+    c = cfg.get('perspective') or 0.0
+    dx, dy = np.subtract(px, center_px)
+    k = 1 + c * dy
+    if c:
+        dx, dy = dx / k, (1 - 1 / k) / c
     m = np.array([cfg['vx'], cfg['vy']], dtype=float).T  # columns: px per +1 X, px per +1 Y
-    d = np.linalg.solve(m, np.subtract(px, center_px))
+    d = np.linalg.solve(m, (dx, dy))
     return float(d[0]), float(d[1])
+
+
+def untilt(img: np.ndarray, c: float) -> np.ndarray:
+    """Redraw a screenshot as if the camera looked straight down, keeping the
+    scale it has at the middle (inverse of the k(y) model in pixel_to_tile)."""
+    if not c:
+        return img
+    h, w = img.shape[:2]
+    ry, rx = np.mgrid[0:h, 0:w].astype(np.float32)
+    ry -= h / 2
+    k = 1 / (1 - c * ry)
+    map_y = h / 2 + (k - 1) / c
+    map_x = w / 2 + k * (rx - w / 2)
+    return cv2.remap(img, map_x.astype(np.float32), map_y.astype(np.float32), cv2.INTER_LINEAR)
 
 
 def detect(cfg: dict, screen: np.ndarray, target: np.ndarray, cx: int, cy: int,
@@ -124,11 +176,13 @@ def detect(cfg: dict, screen: np.ndarray, target: np.ndarray, cx: int, cy: int,
     center = screen_center(screen)
     ox, oy = cfg['tile_offset']
     found = []
-    for score, px, py in find_all(screen, target, cfg['threshold']):
+    for score, px, py, scale in find_all(screen, target, cfg['threshold'], cfg['scales']):
         dx, dy = pixel_to_tile(cfg, center, (px, py))
-        if step and not (-step / 2 <= dx < step / 2 and -step / 2 <= dy < step / 2):
+        # 1 tile of overlap so a node on a cell border is never lost to rounding;
+        # merge() drops the duplicate
+        if step and not (abs(dx) <= step / 2 + 1 and abs(dy) <= step / 2 + 1):
             continue
-        found.append((cx + round(dx) + ox, cy + round(dy) + oy, score, px, py))
+        found.append((cx + round(dx + ox), cy + round(dy + oy), score, px, py, scale))
     return found
 
 
@@ -233,15 +287,39 @@ def cmd_calibrate(cfg: dict, args) -> None:
     goto(cfg, args.x, args.y)
 
     h, w = shots[0].shape
+
+    # Camera tilt: compare how far the ground moved on the X jump in a band near
+    # the top and a band near the bottom. Horizontal movement scales with
+    # k(y) = 1 + c * (y - middle), so the ratio gives c.
+    cols = slice(w // 5, w * 4 // 5)
+    shifts = []
+    for top, bottom in ((0.15, 0.35), (0.65, 0.85)):
+        rows = slice(int(h * top), int(h * bottom))
+        band_win = cv2.createHanningWindow((cols.stop - cols.start, rows.stop - rows.start), cv2.CV_32F)
+        (sx, _), _ = cv2.phaseCorrelate(shots[0][rows, cols], shots[1][rows, cols], band_win)
+        shifts.append((sx, (rows.start + rows.stop) / 2 - h / 2))
+    (s_top, y_top), (s_bottom, y_bottom) = shifts
+    ratio = s_bottom / s_top if s_top else 0
+    if 0.9 <= ratio <= 2.0:
+        cfg['perspective'] = (ratio - 1) / (y_bottom - ratio * y_top)
+        print(f'Camera tilt: ground near the bottom is drawn {ratio:.2f}x the size of near the top.')
+    else:
+        cfg['perspective'] = None
+        print(f'Could not measure the camera tilt (ratio {ratio:.2f}); coordinates far from '
+              f'the middle may be a tile off. Try another spot.')
+
+    # With the tilt undone the ground moves evenly, so one shift per jump gives
+    # the px per tile at the middle of the window.
+    flat = [untilt(s, cfg['perspective']) for s in shots]
     crop = (slice(h // 5, h * 4 // 5), slice(w // 5, w * 4 // 5))  # ignore UI at the edges
     win = cv2.createHanningWindow((w * 4 // 5 - w // 5, h * 4 // 5 - h // 5), cv2.CV_32F)
     vec = []
     for i, axis in ((1, 'X'), (2, 'Y')):
-        (sx, sy), conf = cv2.phaseCorrelate(shots[0][crop], shots[i][crop], win)
+        (sx, sy), conf = cv2.phaseCorrelate(flat[0][crop], flat[i][crop], win)
         # camera +d tiles => ground moves the opposite way on screen
         vec.append([-sx / d, -sy / d])
         print(f'+1 {axis} = ({-sx / d:+.1f}, {-sy / d:+.1f}) px   (match confidence {conf:.2f})')
-        if conf < 0.05:  # perspective keeps this low (~0.1) even when the result is right
+        if conf < 0.05:
             print('  Low confidence: pick a spot with more ground detail, or check the jumps worked.')
     cfg['vx'], cfg['vy'] = vec
 
@@ -260,26 +338,34 @@ def cmd_check(cfg: dict, args) -> None:
     target = cv2.imread(str(HERE / cfg['target']))
     if target is None:
         sys.exit(f'No target image at {cfg["target"]}. Create it with: python screen_scan.py snip cropland')
+    if not cfg.get('perspective'):
+        print('Note: no camera-tilt measurement yet; run "calibrate" again for accurate coordinates.')
     countdown(3, 'focus the game, capturing in')
     with ScreenCapture() as sct:
         screen = grab_game(sct, cfg)
+    img = screen.copy()  # draw here so the boxes never affect detection
     th, tw = target.shape[:2]
+
+    def box(px, py, scale, colour, thick):
+        hw, hh = int(tw * scale / 2), int(th * scale / 2)
+        cv2.rectangle(img, (px - hw, py - hh), (px + hw, py + hh), colour, thick)
+        return hw, hh
+
     # near misses in yellow help pick the threshold
-    near = find_all(screen, target, min(0.7, cfg['threshold']))
-    for score, px, py in near:
+    for score, px, py, scale in find_all(screen, target, min(0.7, cfg['threshold']), cfg['scales']):
         if score < cfg['threshold']:
             print(f'  (rejected: score {score:.2f} at pixel ({px}, {py}))')
-            cv2.rectangle(screen, (px - tw // 2, py - th // 2), (px + tw // 2, py + th // 2), (0, 255, 255), 1)
-            cv2.putText(screen, f'{score:.2f}', (px - tw // 2, py + th // 2 + 16),
+            hw, hh = box(px, py, scale, (0, 255, 255), 1)
+            cv2.putText(img, f'{score:.2f}', (px - hw, py + hh + 16),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
     found = detect(cfg, screen, target, args.x, args.y)
-    for x, y, score, px, py in found:
-        print(f'X:{x} Y:{y}  score {score:.2f}  at pixel ({px}, {py})')
-        cv2.rectangle(screen, (px - tw // 2, py - th // 2), (px + tw // 2, py + th // 2), (0, 0, 255), 2)
-        cv2.putText(screen, f'{x},{y}', (px - tw // 2, py - th // 2 - 6),
+    for x, y, score, px, py, scale in found:
+        print(f'X:{x} Y:{y}  score {score:.2f}  at pixel ({px}, {py}), size {scale:.2f}x')
+        hw, hh = box(px, py, scale, (0, 0, 255), 2)
+        cv2.putText(img, f'{x},{y} ({score:.2f})', (px - hw, py - hh - 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
     out = HERE / 'check.png'
-    if not cv2.imwrite(str(out), screen):
+    if not cv2.imwrite(str(out), img):
         sys.exit(f'{len(found)} found, but could not save {out}')
     print(f'{len(found)} found. Annotated screenshot: {out}\n'
           f'Click a few in game and compare with the popup coordinates.')
@@ -298,7 +384,7 @@ def scan_pass(cfg: dict, args, target: np.ndarray, sct) -> None:
         for x in (xs if row % 2 == 0 else xs[::-1]):  # snake order
             goto(cfg, x, y)
             now = datetime.now().isoformat(timespec='seconds')
-            for nx, ny, score, _, _ in detect(cfg, grab_game(sct, cfg), target, x, y, step):
+            for nx, ny, score, *_ in detect(cfg, grab_game(sct, cfg), target, x, y, step):
                 if merge(nodes, nx, ny, score, now):
                     print(f'  NEW  X:{nx} Y:{ny}  (score {score:.2f})')
             NODES_FILE.write_text(json.dumps(nodes, indent=2))
