@@ -1,7 +1,7 @@
-"""Send mouse-wheel-down notches to whatever window is under the cursor (Windows).
+"""Send a sequence of mouse-wheel notches to the window under the cursor (Windows).
 
-  python zoom_test.py                  5 notches down after a 3 s countdown
-  python zoom_test.py --count 3 --up   3 notches up instead
+  python zoom_test.py                  down 4, up 1, down 1 (0.4 s apart) after a 3 s countdown
+  python zoom_test.py --seq d5         any other sequence: d = down, u = up, e.g. d3,u2
   python zoom_test.py --at 960 540     move the cursor there first
   python zoom_test.py --shots          also save a screenshot after each notch
 
@@ -47,15 +47,29 @@ def wheel(notches: int) -> bool:
     return user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) == 1
 
 
+def parse_seq(seq: str) -> list:
+    """'d4,u1,d1' -> [-1, -1, -1, -1, 1, -1] (one entry per notch, +1 = up)."""
+    notches = []
+    for step in seq.replace(' ', '').lower().split(','):
+        if step[:1] not in ('d', 'u') or not step[1:].isdigit():
+            raise ValueError(step)
+        notches += [1 if step[0] == 'u' else -1] * int(step[1:])
+    return notches
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('--count', type=int, default=5, help='number of notches (default 5)')
-    p.add_argument('--up', action='store_true', help='scroll up instead of down')
-    p.add_argument('--interval', type=float, default=0.3, help='seconds between notches (default 0.3)')
+    p.add_argument('--seq', default='d4,u1,d1',
+                   help='comma-separated steps, d = down, u = up, number = notches (default d4,u1,d1)')
+    p.add_argument('--interval', type=float, default=0.4, help='seconds between notches (default 0.4)')
     p.add_argument('--delay', type=float, default=3, help='countdown before starting (default 3)')
     p.add_argument('--at', type=int, nargs=2, metavar=('X', 'Y'), help='move the cursor here first')
     p.add_argument('--shots', action='store_true', help='save a screenshot before and after each notch')
     args = p.parse_args()
+    try:
+        steps = parse_seq(args.seq)
+    except ValueError:
+        p.error(f'bad --seq {args.seq!r}; use e.g. d4,u1,d1')
 
     # Use real pixel coordinates even with Windows display scaling (125%, 150%...)
     try:
@@ -86,18 +100,17 @@ def main() -> int:
         time.sleep(0.1)
     pt = wintypes.POINT()
     user32.GetCursorPos(ctypes.byref(pt))
-    direction = 'up' if args.up else 'down'
-    print(f'Scrolling {direction} {args.count}x at cursor ({pt.x}, {pt.y})')
+    print(f'Scrolling {args.seq} at cursor ({pt.x}, {pt.y})')
 
     shot(0)
-    for i in range(1, args.count + 1):
-        if not wheel(1 if args.up else -1):
+    for i, notch in enumerate(steps, 1):
+        if not wheel(notch):
             print('SendInput was blocked. If the game runs as administrator, '
                   'run this script from an administrator terminal too.')
             return 1
         time.sleep(args.interval)
         shot(i)
-        print(f'  notch {i}')
+        print(f'  notch {i}: {"up" if notch > 0 else "down"}')
     if sct:
         print(f'Screenshots saved in {out_dir}')
     return 0
