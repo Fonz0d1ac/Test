@@ -49,13 +49,13 @@ pip install -r requirements.txt
 
 ## Map node scanner (`node_scan.py`)
 
-Scans a rectangle of the game map for a target sprite by jumping through the coordinate search popup, and records each sprite's map coordinates in `nodes.json`. Run each step with the game on screen, the UI hidden (blue button, top left) and the camera at the fly-home zoom level. The script clicks and types, so leave the mouse alone while it runs. **To stop it, push the mouse into the top-left corner of the screen.**
+Scans a rectangle of the game map for a target sprite by jumping through the coordinate search popup, and records each sprite's map coordinates in `nodes.json`. Run each step with the game window visible and not covered, the UI hidden (blue button, top left) and the camera at the fly-home zoom level. It finds the window by its title (`window_title`, default `Rise of Kingdoms`) and works only inside it, so you can move the window. If you resize it, redo steps 2 and 4. The script clicks and types, so leave the mouse alone while it runs. **To stop it, push the mouse into the top-left corner of the screen.**
 
 1. `python node_scan.py setup`: hover over each point it asks for (the magnifier on the coordinate bar, the X box, the Y box, the blue search button) until its countdown ends. Open the popup yourself before the X box step.
-2. `python screen_scan.py snip cropland`: crop the target sprite tightly. It must be taken at the same zoom you scan at.
+2. `python screen_scan.py snip cropland`: crop the target sprite tightly. It must be taken at the same zoom and window size you scan at.
 3. `python node_scan.py goto 312 930`: check that the jump lands where it should.
 4. `python node_scan.py calibrate 312 930`: jumps +4 X and +4 Y from there and measures how far the ground moves. Pick open ground with some detail.
-5. `python node_scan.py check 312 930`: with the map centred on X:312 Y:930, finds the sprites on screen and saves `check.png` with their computed coordinates. Click a couple in game and compare with the popup. If they are all off by the same amount, set `tile_offset` in `scan_config.json`.
+5. `python node_scan.py check 312 930`: with the map centred on X:312 Y:930, finds the sprites in the game window and opens `check.png`: red boxes are accepted, with their computed coordinates, and yellow boxes are near misses with their scores. Click a couple in game and compare with the popup. If they are all off by the same amount, set `tile_offset` in `scan_config.json`.
 6. `python node_scan.py scan 200 800 400 1000`: scans X 200–400, Y 800–1000 in 16-tile steps and prints NEW/GONE nodes. Add `--loop 10` to re-scan every 10 minutes.
 
-Tuning lives in `scan_config.json`: `threshold` (match score, default 0.85), `load_wait` (seconds after each jump, default 1.2) and `step` (tiles between scan points, default 16). Only sprites inside each scan point's own 16×16 cell are recorded, which keeps the coordinate maths in the accurate middle of the screen.
+Tuning lives in `scan_config.json`: `threshold` (match score, default 0.92; food nodes look similar and score about 0.85), `load_wait` (seconds after each jump, default 1.2) and `step` (tiles between scan points, default 16). Only sprites inside each scan point's own 16×16 cell are recorded, which keeps the coordinate maths in the accurate middle of the screen.

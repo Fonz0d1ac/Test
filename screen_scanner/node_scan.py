@@ -1,7 +1,8 @@
 """Scan a region of the game map for a target sprite and record its map coordinates.
 
-Steps, in order (game on screen, UI hidden with the blue button, at the
-fly-home zoom level):
+Steps, in order (game window visible and not covered, UI hidden with the blue
+button, at the fly-home zoom level). Keep the game window the same size
+afterwards; moving it is fine. If you resize it, redo snip and calibrate.
 
   python node_scan.py setup                    record where the search button / X / Y / Go are
   python screen_scan.py snip cropland          crop the target sprite (once)
@@ -25,21 +26,22 @@ import cv2
 import numpy as np
 
 import wininput as wi
-from screen_scan import ScreenCapture, grab
+from screen_scan import ScreenCapture
 
 HERE = Path(__file__).parent.resolve()
 CONFIG_FILE = HERE / 'scan_config.json'
 NODES_FILE = HERE / 'nodes.json'
 
+CONFIG_VERSION = 2
 DEFAULTS = {
+    'version': CONFIG_VERSION,
+    'window_title': 'Rise of Kingdoms',
     'target': 'targets/cropland.png',
-    'threshold': 0.85,
+    'threshold': 0.92,   # food nodes look similar and score ~0.85
     'load_wait': 1.2,    # seconds after a jump before taking the screenshot
     'step': 16,          # map tiles between scan points
-    'monitor': 1,
-    'center': None,      # screen pixel of the map centre; None = middle of the monitor
     'tile_offset': [0, 0],  # added to every result, to correct a constant error
-    'points': {},        # search_button, x_field, y_field, go_button (absolute screen px)
+    'window_points': {},  # search_button, x_field, y_field, go_button (px inside the game window)
     'vx': None,          # screen px moved per +1 map X
     'vy': None,          # screen px moved per +1 map Y
 }
@@ -61,7 +63,14 @@ class Stop(Exception):
 def load_config() -> dict:
     cfg = dict(DEFAULTS)
     if CONFIG_FILE.exists():
-        cfg.update(json.loads(CONFIG_FILE.read_text()))
+        saved = json.loads(CONFIG_FILE.read_text())
+        if saved.get('version', 1) < 2:
+            # v1 measured from the whole monitor: drop its screen positions and old threshold
+            for key in ('points', 'monitor', 'center', 'threshold', 'version'):
+                saved.pop(key, None)
+            print('Config updated: positions are now relative to the game window. '
+                  'Run "setup" again (calibration is kept).')
+        cfg.update(saved)
     return cfg
 
 
@@ -70,7 +79,7 @@ def save_config(cfg: dict) -> None:
 
 
 def need(cfg: dict, points: bool = False, calibration: bool = False) -> None:
-    missing = [p for p, _ in POINTS if points and p not in cfg['points']]
+    missing = [p for p, _ in POINTS if points and p not in cfg['window_points']]
     missing += [k for k in ('vx', 'vy') if calibration and not cfg[k]]
     if missing:
         sys.exit(f'Missing in {CONFIG_FILE.name}: {", ".join(missing)}. '
@@ -94,9 +103,8 @@ def find_all(screen: np.ndarray, target: np.ndarray, threshold: float) -> list:
     return [(float(r[y, x]), x + tw // 2, y + th // 2) for y, x in zip(*np.nonzero(peaks))]
 
 
-def screen_center(cfg: dict, screen: np.ndarray) -> tuple:
-    if cfg['center']:
-        return tuple(cfg['center'])
+def screen_center(screen: np.ndarray) -> tuple:
+    """The map coordinate in the coordinate bar is the middle of the game view."""
     h, w = screen.shape[:2]
     return w / 2, h / 2
 
@@ -113,7 +121,7 @@ def detect(cfg: dict, screen: np.ndarray, target: np.ndarray, cx: int, cy: int,
     """Targets on screen as map coords [(x, y, score, px, py)]. With step, keep only
     those inside this scan point's own step x step cell (the most accurate part of
     the screen; neighbouring scan points cover the rest)."""
-    center = screen_center(cfg, screen)
+    center = screen_center(screen)
     ox, oy = cfg['tile_offset']
     found = []
     for score, px, py in find_all(screen, target, cfg['threshold']):
@@ -122,6 +130,21 @@ def detect(cfg: dict, screen: np.ndarray, target: np.ndarray, cx: int, cy: int,
             continue
         found.append((cx + round(dx) + ox, cy + round(dy) + oy, score, px, py))
     return found
+
+
+# ---------- game window ----------
+
+def grab_game(sct, cfg: dict) -> np.ndarray:
+    """Screenshot of just the game window's drawable area, as BGR."""
+    left, top, width, height = wi.client_rect(cfg['window_title'])
+    shot = sct.grab({'left': left, 'top': top, 'width': width, 'height': height})
+    return cv2.cvtColor(np.asarray(shot), cv2.COLOR_BGRA2BGR)
+
+
+def click_point(cfg: dict, name: str) -> None:
+    left, top, _, _ = wi.client_rect(cfg['window_title'])
+    x, y = cfg['window_points'][name]
+    wi.click(left + x, top + y)
 
 
 # ---------- game actions ----------
@@ -134,20 +157,19 @@ def check_stop() -> None:
 
 def goto(cfg: dict, x: int, y: int) -> None:
     """Jump the map centre to (x, y) through the coordinate search popup."""
-    p = cfg['points']
     check_stop()
-    wi.click(*p['search_button'])
+    click_point(cfg, 'search_button')
     time.sleep(0.5)
     for field, value in (('x_field', x), ('y_field', y)):
         check_stop()
-        wi.click(*p[field])
+        click_point(cfg, field)
         time.sleep(0.15)
         wi.press(wi.VK_END)
         wi.press(wi.VK_BACK, 6)
         wi.type_digits(str(value))
         time.sleep(0.1)
     check_stop()
-    wi.click(*p['go_button'])
+    click_point(cfg, 'go_button')
     time.sleep(cfg['load_wait'])
 
 
@@ -182,8 +204,10 @@ def cmd_setup(cfg: dict, args) -> None:
     for key, desc in POINTS:
         print(f'\n{key}: hover over {desc}')
         countdown(6, 'recording in')
-        cfg['points'][key] = list(wi.cursor_pos())
-        print(f'  {key} = {cfg["points"][key]}')
+        left, top, _, _ = wi.client_rect(cfg['window_title'])
+        x, y = wi.cursor_pos()
+        cfg['window_points'][key] = [x - left, y - top]
+        print(f'  {key} = {cfg["window_points"][key]} (inside the game window)')
     save_config(cfg)
     print(f'\nSaved to {CONFIG_FILE.name}. Close the popup, then try: python node_scan.py goto X Y')
 
@@ -205,7 +229,7 @@ def cmd_calibrate(cfg: dict, args) -> None:
         for x, y in ((args.x, args.y), (args.x + d, args.y), (args.x, args.y + d)):
             goto(cfg, x, y)
             time.sleep(0.5)
-            shots.append(cv2.cvtColor(grab(sct, cfg['monitor']), cv2.COLOR_BGR2GRAY).astype(np.float32))
+            shots.append(cv2.cvtColor(grab_game(sct, cfg), cv2.COLOR_BGR2GRAY).astype(np.float32))
     goto(cfg, args.x, args.y)
 
     h, w = shots[0].shape
@@ -238,9 +262,17 @@ def cmd_check(cfg: dict, args) -> None:
         sys.exit(f'No target image at {cfg["target"]}. Create it with: python screen_scan.py snip cropland')
     countdown(3, 'focus the game, capturing in')
     with ScreenCapture() as sct:
-        screen = grab(sct, cfg['monitor'])
-    found = detect(cfg, screen, target, args.x, args.y)
+        screen = grab_game(sct, cfg)
     th, tw = target.shape[:2]
+    # near misses in yellow help pick the threshold
+    near = find_all(screen, target, min(0.7, cfg['threshold']))
+    for score, px, py in near:
+        if score < cfg['threshold']:
+            print(f'  (rejected: score {score:.2f} at pixel ({px}, {py}))')
+            cv2.rectangle(screen, (px - tw // 2, py - th // 2), (px + tw // 2, py + th // 2), (0, 255, 255), 1)
+            cv2.putText(screen, f'{score:.2f}', (px - tw // 2, py + th // 2 + 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+    found = detect(cfg, screen, target, args.x, args.y)
     for x, y, score, px, py in found:
         print(f'X:{x} Y:{y}  score {score:.2f}  at pixel ({px}, {py})')
         cv2.rectangle(screen, (px - tw // 2, py - th // 2), (px + tw // 2, py + th // 2), (0, 0, 255), 2)
@@ -266,7 +298,7 @@ def scan_pass(cfg: dict, args, target: np.ndarray, sct) -> None:
         for x in (xs if row % 2 == 0 else xs[::-1]):  # snake order
             goto(cfg, x, y)
             now = datetime.now().isoformat(timespec='seconds')
-            for nx, ny, score, _, _ in detect(cfg, grab(sct, cfg['monitor']), target, x, y, step):
+            for nx, ny, score, _, _ in detect(cfg, grab_game(sct, cfg), target, x, y, step):
                 if merge(nodes, nx, ny, score, now):
                     print(f'  NEW  X:{nx} Y:{ny}  (score {score:.2f})')
             NODES_FILE.write_text(json.dumps(nodes, indent=2))
@@ -328,6 +360,8 @@ def main() -> int:
          'check': cmd_check, 'scan': cmd_scan}[args.cmd](cfg, args)
     except (Stop, KeyboardInterrupt):
         print('\nStopped.')
+    except RuntimeError as e:
+        sys.exit(str(e))
     return 0
 
 

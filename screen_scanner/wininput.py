@@ -98,3 +98,19 @@ def press(vk: int, times: int = 1) -> None:
 def type_digits(text: str) -> None:
     for ch in text:
         press(ord(ch))  # VK codes for 0-9 are their ASCII codes
+
+
+def client_rect(title: str) -> tuple:
+    """Screen position and size of a window's drawable area: (left, top, width, height)."""
+    if user32 is None:
+        raise RuntimeError('Window lookup only works on Windows.')
+    hwnd = user32.FindWindowW(None, title)
+    if not hwnd:
+        raise RuntimeError(f'No window titled "{title}" - is the game open?')
+    if user32.IsIconic(hwnd):
+        raise RuntimeError(f'"{title}" is minimized - restore it first.')
+    rect = wintypes.RECT()
+    user32.GetClientRect(hwnd, ctypes.byref(rect))
+    origin = wintypes.POINT(0, 0)
+    user32.ClientToScreen(hwnd, ctypes.byref(origin))
+    return origin.x, origin.y, rect.right, rect.bottom
