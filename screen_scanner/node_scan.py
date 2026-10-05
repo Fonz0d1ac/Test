@@ -30,6 +30,11 @@ import numpy as np
 import wininput as wi
 from screen_scan import ScreenCapture
 
+if not hasattr(wi, 'type_keys'):
+    sys.exit(f'wininput.py in {Path(__file__).parent} is older than node_scan.py. '
+             f'Replace the whole screen_scanner folder with the latest download, then copy '
+             f'scan_config.json, targets/ and nodes_*.json back in.')
+
 HERE = Path(__file__).parent.resolve()
 CONFIG_FILE = HERE / 'scan_config.json'
 NODES_DIR = HERE  # results go in nodes_<target>.json here
