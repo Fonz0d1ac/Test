@@ -15,6 +15,7 @@ Emergency stop: push the mouse into the top-left corner of the screen.
 """
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime
@@ -245,10 +246,13 @@ def cmd_check(cfg: dict, args) -> None:
         cv2.rectangle(screen, (px - tw // 2, py - th // 2), (px + tw // 2, py + th // 2), (0, 0, 255), 2)
         cv2.putText(screen, f'{x},{y}', (px - tw // 2, py - th // 2 - 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-    cv2.imwrite(str(HERE / 'check.png'), screen)
-    print(f'{len(found)} found. Annotated screenshot: {HERE / "check.png"}\n'
-          f'Click a few in game and '
-          f'compare with the popup coordinates.')
+    out = HERE / 'check.png'
+    if not cv2.imwrite(str(out), screen):
+        sys.exit(f'{len(found)} found, but could not save {out}')
+    print(f'{len(found)} found. Annotated screenshot: {out}\n'
+          f'Click a few in game and compare with the popup coordinates.')
+    if sys.platform == 'win32':
+        os.startfile(out)  # open it in the default image viewer
 
 
 def scan_pass(cfg: dict, args, target: np.ndarray, sct) -> None:
