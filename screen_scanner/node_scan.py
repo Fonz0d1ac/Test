@@ -429,6 +429,11 @@ def scan_pass(cfg: dict, args, target: np.ndarray, sct) -> None:
     step = cfg['step']
     xs = list(range(args.x1, args.x2 + 1, step))
     ys = list(range(args.y1, args.y2 + 1, step))
+    # each point covers +-step/2; add one at the far edge if the last one stops short
+    if args.x2 - xs[-1] > step / 2:
+        xs.append(args.x2)
+    if args.y2 - ys[-1] > step / 2:
+        ys.append(args.y2)
     nodes = load_nodes()
     start = datetime.now().isoformat(timespec='seconds')
     print(f'\n[{start}] Scanning {len(xs) * len(ys)} points...')
