@@ -100,6 +100,18 @@ def type_digits(text: str) -> None:
         press(ord(ch))  # VK codes for 0-9 are their ASCII codes
 
 
+def type_keys(vks: list, delay: float = 0.0) -> None:
+    """Press and release each key in order. delay = pause between events;
+    0 sends the whole sequence in a single call (fastest)."""
+    events = [e for vk in vks for e in (_key(vk), _key(vk, up=True))]
+    if not delay:
+        _send(*events)
+        return
+    for e in events:
+        _send(e)
+        time.sleep(delay)
+
+
 def client_rect(title: str) -> tuple:
     """Screen position and size of a window's drawable area: (left, top, width, height)."""
     if user32 is None:

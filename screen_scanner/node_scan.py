@@ -12,6 +12,7 @@ afterwards; moving it is fine. If you resize it, redo snip and calibrate.
   python node_scan.py scan 200 800 400 1000    scan X 200..400, Y 800..1000, save nodes.json
   python node_scan.py scan ... --loop 10       re-scan every 10 minutes
   python node_scan.py scan ... --target gem    look for targets/gem.png instead (own nodes_gem.json)
+  python node_scan.py set-offset gem -1 0      shift every gem result by X -1, Y 0
 
 Emergency stop: push the mouse into the top-left corner of the screen.
 """
@@ -33,7 +34,7 @@ HERE = Path(__file__).parent.resolve()
 CONFIG_FILE = HERE / 'scan_config.json'
 NODES_DIR = HERE  # results go in nodes_<target>.json here
 
-CONFIG_VERSION = 3
+CONFIG_VERSION = 4
 DEFAULTS = {
     'version': CONFIG_VERSION,
     'window_title': 'Rise of Kingdoms',
@@ -42,9 +43,11 @@ DEFAULTS = {
     'scales': [0.75, 1.35],  # sprite size range searched, relative to the target image
     'load_wait': 1.2,    # seconds after a jump before taking the screenshot
     'popup_wait': 3.0,   # longest to wait for the search popup to open
-    'click_wait': 0.3,   # pause after each click and after typing
+    'click_wait': 0.15,  # pause after each click and after typing
+    'key_delay': 0.01,   # pause between key presses; 0 types a field instantly
     'step': 16,          # map tiles between scan points
     'tile_offset': [0, 0],  # added to every result, to correct a constant error
+    'target_offsets': {},   # per target, e.g. {"gem": [-1, 0]}; replaces tile_offset
     'window_points': {},  # search_button, x_field, y_field, go_button (px inside the game window)
     'vx': None,          # screen px moved per +1 map X, at the middle of the window
     'vy': None,          # screen px moved per +1 map Y, at the middle of the window
@@ -81,8 +84,11 @@ def load_config() -> dict:
             for key in ('threshold', 'tile_offset', 'version'):
                 saved.pop(key, None)
             print('Config updated: run "calibrate" again to measure the camera tilt.')
+        if version < 4 and saved.get('click_wait') == 0.3:
+            saved.pop('click_wait')  # old default; typing is faster now
         cfg.update(saved)
         if version < CONFIG_VERSION:
+            cfg['version'] = CONFIG_VERSION
             save_config(cfg)
     return cfg
 
@@ -224,7 +230,8 @@ def detect(cfg: dict, screen: np.ndarray, target: np.ndarray, cx: int, cy: int,
         # merge() drops the duplicate
         if step and not (abs(dx) <= step / 2 + 1 and abs(dy) <= step / 2 + 1):
             continue
-        found.append((cx + round(dx + ox), cy + round(dy + oy), score, px, py, scale))
+        fx, fy = cx + dx + ox, cy + dy + oy
+        found.append((round(fx), round(fy), score, px, py, scale, fx, fy))
     return found
 
 
@@ -295,9 +302,9 @@ def goto(cfg: dict, x: int, y: int) -> None:
         check_stop()
         click_point(cfg, field)
         time.sleep(wait)
-        wi.press(wi.VK_END)
-        wi.press(wi.VK_BACK, 6)
-        wi.type_digits(str(value))
+        # coordinates are at most 4 digits: End + 4 backspaces clears the box
+        wi.type_keys([wi.VK_END] + [wi.VK_BACK] * 4 + [ord(ch) for ch in str(value)],
+                     cfg['key_delay'])
         time.sleep(wait)
     check_stop()
     click_point(cfg, 'go_button')
@@ -335,6 +342,8 @@ def load_target(cfg: dict, args) -> tuple:
         sys.exit(f'No target image at {path}. Create it with: python screen_scan.py snip {path.stem}')
     if getattr(args, 'threshold', None):
         cfg['threshold'] = args.threshold
+    if path.stem in cfg['target_offsets']:
+        cfg['tile_offset'] = cfg['target_offsets'][path.stem]
     return img, path
 
 
@@ -432,8 +441,9 @@ def cmd_check(cfg: dict, args) -> None:
             cv2.putText(img, f'{score:.2f}', (px - hw, py + hh + 16),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
     found = detect(cfg, screen, target, args.x, args.y)
-    for x, y, score, px, py, scale in found:
-        print(f'X:{x} Y:{y}  score {score:.2f}  at pixel ({px}, {py}), size {scale:.2f}x')
+    for x, y, score, px, py, scale, fx, fy in found:
+        print(f'X:{x} Y:{y}  (exact {fx:.1f}, {fy:.1f})  score {score:.2f}  '
+              f'at pixel ({px}, {py}), size {scale:.2f}x')
         hw, hh = box(px, py, scale, (0, 0, 255), 2)
         cv2.putText(img, f'{x},{y} ({score:.2f})', (px - hw, py - hh - 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
@@ -476,6 +486,13 @@ def scan_pass(cfg: dict, args, target: np.ndarray, sct, results: Path) -> None:
     nodes = [n for n in nodes if n not in gone]
     results.write_text(json.dumps(nodes, indent=2))
     print(f'Pass done: {len(nodes)} nodes in {results.name}')
+
+
+def cmd_offset(cfg: dict, args) -> None:
+    """Save a correction for one target: added to every coordinate found for it."""
+    cfg['target_offsets'][args.name] = [args.dx, args.dy]
+    save_config(cfg)
+    print(f'{args.name}: results will be shifted by X {args.dx:+g}, Y {args.dy:+g}.')
 
 
 def cmd_scan(cfg: dict, args) -> None:
@@ -529,12 +546,16 @@ def main() -> int:
         s.add_argument(a, type=int)
     target_options(s)
     s.add_argument('--loop', type=float, metavar='MIN', help='repeat a full pass every MIN minutes')
+    s = sub.add_parser('set-offset', help='correct a target\'s results by DX DY tiles')
+    s.add_argument('name', help='target name, e.g. gem')
+    s.add_argument('dx', type=float)
+    s.add_argument('dy', type=float)
     args = p.parse_args()
 
     cfg = load_config()
     try:
         {'setup': cmd_setup, 'goto': cmd_goto, 'calibrate': cmd_calibrate,
-         'check': cmd_check, 'scan': cmd_scan}[args.cmd](cfg, args)
+         'check': cmd_check, 'scan': cmd_scan, 'set-offset': cmd_offset}[args.cmd](cfg, args)
     except (Stop, KeyboardInterrupt):
         print('\nStopped.')
     except RuntimeError as e:
