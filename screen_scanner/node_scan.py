@@ -170,6 +170,45 @@ def untilt(img: np.ndarray, c: float) -> np.ndarray:
     return cv2.remap(img, map_x.astype(np.float32), map_y.astype(np.float32), cv2.INTER_LINEAR)
 
 
+def fit_calibration(shots: list, d: int) -> dict:
+    """From three screenshots (start, +d X, +d Y) find the camera tilt and the
+    px per tile at the middle of the window.
+
+    Each candidate tilt is undone on all three shots and the X and Y jumps are
+    measured with phase correlation: with the right tilt the ground moves the
+    same amount everywhere and both matches are sharp (high confidence), with
+    a wrong one they smear. Keep the tilt with the best combined confidence."""
+    h, w = shots[0].shape
+    crop = (slice(h // 5, h * 4 // 5), slice(w // 5, w * 4 // 5))  # ignore UI at the edges
+    win = cv2.createHanningWindow((w * 4 // 5 - w // 5, h * 4 // 5 - h // 5), cv2.CV_32F)
+
+    def measure(ratio):
+        # ratio = size at 3/4 down the window / size at 1/4 down
+        c = 4 * (ratio - 1) / (h * (ratio + 1))
+        flat = [untilt(s, c) for s in shots]
+        (xs, ys), cx_ = cv2.phaseCorrelate(flat[0][crop], flat[1][crop], win)
+        (xs2, ys2), cy_ = cv2.phaseCorrelate(flat[0][crop], flat[2][crop], win)
+        # A d-tile jump moves the ground well over 10 px per tile; a near-zero
+        # shift means it matched something that stayed put (resampling
+        # patterns on plain ground, leftover UI), so that tilt is not a fit.
+        moved = np.hypot(xs, ys) > 10 * d and np.hypot(xs2, ys2) > 10 * d
+        # camera +d tiles => ground moves the opposite way on screen
+        return {'ratio': ratio, 'c': c, 'vx': [-xs / d, -ys / d], 'vy': [-xs2 / d, -ys2 / d],
+                'conf_x': cx_, 'conf_y': cy_, 'score': cx_ + cy_ if moved else -1}
+
+    lo, hi = 1.0, 1.8
+    best = max((measure(r) for r in np.arange(lo, hi + 1e-9, 0.04)), key=lambda m: m['score'])
+    r0 = best['ratio']
+    best = max((measure(r) for r in np.arange(max(lo, r0 - 0.04), min(hi, r0 + 0.04) + 1e-9, 0.01)),
+               key=lambda m: m['score'])
+    if best['score'] < 0:
+        raise RuntimeError('Calibration failed: the ground did not seem to move between jumps. '
+                           'Check the jumps land (try "goto"), the UI is hidden, and pick a spot '
+                           'with more ground detail.')
+    best['at_limit'] = best['ratio'] >= hi - 0.01  # 1.0 (no tilt) is a valid answer
+    return best
+
+
 def detect(cfg: dict, screen: np.ndarray, target: np.ndarray, cx: int, cy: int,
            step: int = None) -> list:
     """Targets on screen as map coords [(x, y, score, px, py)]. With step, keep only
@@ -324,41 +363,17 @@ def cmd_calibrate(cfg: dict, args) -> None:
     goto(cfg, args.x, args.y)
 
     h, w = shots[0].shape
-
-    # Camera tilt: compare how far the ground moved on the X jump in a band near
-    # the top and a band near the bottom. Horizontal movement scales with
-    # k(y) = 1 + c * (y - middle), so the ratio gives c.
-    cols = slice(w // 5, w * 4 // 5)
-    shifts = []
-    for top, bottom in ((0.15, 0.35), (0.65, 0.85)):
-        rows = slice(int(h * top), int(h * bottom))
-        band_win = cv2.createHanningWindow((cols.stop - cols.start, rows.stop - rows.start), cv2.CV_32F)
-        (sx, _), _ = cv2.phaseCorrelate(shots[0][rows, cols], shots[1][rows, cols], band_win)
-        shifts.append((sx, (rows.start + rows.stop) / 2 - h / 2))
-    (s_top, y_top), (s_bottom, y_bottom) = shifts
-    ratio = s_bottom / s_top if s_top else 0
-    if 0.9 <= ratio <= 2.0:
-        cfg['perspective'] = (ratio - 1) / (y_bottom - ratio * y_top)
-        print(f'Camera tilt: ground near the bottom is drawn {ratio:.2f}x the size of near the top.')
-    else:
-        cfg['perspective'] = None
-        print(f'Could not measure the camera tilt (ratio {ratio:.2f}); coordinates far from '
-              f'the middle may be a tile off. Try another spot.')
-
-    # With the tilt undone the ground moves evenly, so one shift per jump gives
-    # the px per tile at the middle of the window.
-    flat = [untilt(s, cfg['perspective']) for s in shots]
-    crop = (slice(h // 5, h * 4 // 5), slice(w // 5, w * 4 // 5))  # ignore UI at the edges
-    win = cv2.createHanningWindow((w * 4 // 5 - w // 5, h * 4 // 5 - h // 5), cv2.CV_32F)
-    vec = []
-    for i, axis in ((1, 'X'), (2, 'Y')):
-        (sx, sy), conf = cv2.phaseCorrelate(flat[0][crop], flat[i][crop], win)
-        # camera +d tiles => ground moves the opposite way on screen
-        vec.append([-sx / d, -sy / d])
-        print(f'+1 {axis} = ({-sx / d:+.1f}, {-sy / d:+.1f}) px   (match confidence {conf:.2f})')
-        if conf < 0.05:
-            print('  Low confidence: pick a spot with more ground detail, or check the jumps worked.')
-    cfg['vx'], cfg['vy'] = vec
+    print('Measuring...')
+    fit = fit_calibration(shots, d)
+    cfg['perspective'], cfg['vx'], cfg['vy'] = fit['c'], fit['vx'], fit['vy']
+    print(f'Camera tilt: ground near the bottom is drawn {fit["ratio"]:.2f}x the size of near the top.')
+    for axis, v, conf in (('X', fit['vx'], fit['conf_x']), ('Y', fit['vy'], fit['conf_y'])):
+        print(f'+1 {axis} = ({v[0]:+.1f}, {v[1]:+.1f}) px   (match confidence {conf:.2f})')
+    if min(fit['conf_x'], fit['conf_y']) < 0.1:
+        print('  Low confidence: make sure the UI is hidden and nothing covers the game, and pick\n'
+              '  open ground with some detail (not water, not a big building), then run it again.')
+    if fit['at_limit']:
+        print('  The tilt hit the edge of the search range; the result is probably wrong.')
 
     step = cfg['step']
     cx, cy = w / 2, h / 2
