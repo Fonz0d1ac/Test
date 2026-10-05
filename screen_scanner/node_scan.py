@@ -216,7 +216,7 @@ def cmd_calibrate(cfg: dict, args) -> None:
         # camera +d tiles => ground moves the opposite way on screen
         vec.append([-sx / d, -sy / d])
         print(f'+1 {axis} = ({-sx / d:+.1f}, {-sy / d:+.1f}) px   (match confidence {conf:.2f})')
-        if conf < 0.1:
+        if conf < 0.05:  # perspective keeps this low (~0.1) even when the result is right
             print('  Low confidence: pick a spot with more ground detail, or check the jumps worked.')
     cfg['vx'], cfg['vy'] = vec
 
