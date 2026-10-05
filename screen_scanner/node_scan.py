@@ -246,7 +246,8 @@ def cmd_check(cfg: dict, args) -> None:
         cv2.putText(screen, f'{x},{y}', (px - tw // 2, py - th // 2 - 6),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
     cv2.imwrite(str(HERE / 'check.png'), screen)
-    print(f'{len(found)} found. Annotated screenshot: check.png - click a few in game and '
+    print(f'{len(found)} found. Annotated screenshot: {HERE / "check.png"}\n'
+          f'Click a few in game and '
           f'compare with the popup coordinates.')
 
 
