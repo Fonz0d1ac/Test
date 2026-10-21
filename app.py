@@ -5,7 +5,7 @@ Time-study hours and FG completion now sourced from SQL Server.
 Worker pool is shift-filtered from live attendance parsing.
 """
 
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request, render_template, send_from_directory
 import json, os, sys, queue, threading, time, zipfile, re, webbrowser
 from datetime import datetime, date, timedelta
 import openpyxl
@@ -23,8 +23,8 @@ warnings.filterwarnings('ignore', module='openpyxl')
 # PCs are running the same version — instead of grepping the source or, worse,
 # discovering a stale PC only when a fixed bug reappears on one area. Format:
 # YYYY.MM.DD[.n] date-based; the trailing note is just a human label.
-BUILD_VERSION = '2026.09.30.14'
-BUILD_NOTE    = 'combined_dashboard: [Earned hour] is nvarchar - TRY_CAST + safe float so one junk row cannot abort the station pace model (SQL 8114)'
+BUILD_VERSION = '2026.10.21.15'
+BUILD_NOTE    = 'ETC pauses for breaks/meal/5S and is anchored at reset/scan/crew change; timer debug screen'
 
 # ── Dev / test mode ─────────────────────────────────────────────────────────────
 # When ON, the board:
@@ -251,7 +251,6 @@ def write_dashboard_status():
         clears it instead of dropping the update,
       - error logging throttled to once a minute so a genuinely unreachable/
         read-only share doesn't flood the console every 5s."""
-    global _dashboard_last_err_ts
     if DEV_MODE:
         return  # dev/test mode — never feed the big screen with test data
     try:
@@ -273,6 +272,13 @@ def write_dashboard_status():
          'window.NPV_STATUS=window.NPV_STATUS||{};\n'
          f'window.NPV_STATUS[{AREA!r}]={body};'),
     ]
+    _write_share_outputs(outputs, 'dashboard feed')
+
+def _write_share_outputs(outputs, label):
+    """Atomically write [(fname, text), ...] into DASHBOARD_STATUS_DIR (the
+    hardening described in write_dashboard_status), logging failures at most
+    once a minute."""
+    global _dashboard_last_err_ts
     try:
         os.makedirs(DASHBOARD_STATUS_DIR, exist_ok=True)
         for fname, text in outputs:
@@ -299,12 +305,37 @@ def write_dashboard_status():
     except Exception as e:
         now = time.time()
         if now - _dashboard_last_err_ts > 60:
-            print(f'[dashboard feed] write failed (retried; further errors muted 60s): {e}')
+            print(f'[{label}] write failed (retried; further errors muted 60s): {e}')
             _dashboard_last_err_ts = now
 
+DEBUG_WRITE_EVERY_N = 3   # timer-debug feed every 3rd dashboard write (~15s)
+
+def write_debug_status():
+    """{AREA}_debug.{json,js} for shared_debug.html — the timer-debug view of
+    this area. Same rules as the dashboard feed: never in dev mode."""
+    if DEV_MODE:
+        return
+    try:
+        dbg = build_timer_debug(AREA)
+    except Exception as e:
+        print(f'[debug feed] build failed: {e}')
+        return
+    dbg['__written'] = int(time.time() * 1000)
+    body = json.dumps(dbg, default=str)
+    _write_share_outputs([
+        (f'{AREA}_debug.json', body),
+        (f'{AREA}_debug.js',
+         'window.NPV_DEBUG=window.NPV_DEBUG||{};\n'
+         f'window.NPV_DEBUG[{AREA!r}]={body};'),
+    ], 'debug feed')
+
 def _dashboard_write_loop():
+    n = 0
     while True:
         write_dashboard_status()
+        if n % DEBUG_WRITE_EVERY_N == 0:
+            write_debug_status()
+        n += 1
         time.sleep(DASHBOARD_WRITE_INTERVAL_SEC)
 
 # ── Attendance / shift config (ported from the ahead/behind dashboard's server.py) ──
@@ -1372,11 +1403,15 @@ SHIFT_SCHEDULE = {
     # HC has no 3h-OT row in the summary; _shift_downtime() falls back to HC/OT2.
 }
 
+def _shift_sched(shift, tier):
+    """SHIFT_SCHEDULE row for a (shift, tier), with the same fallback chain
+    everywhere (HC has no 3h-OT row → HC/OT2)."""
+    return SHIFT_SCHEDULE.get((shift, tier)) or SHIFT_SCHEDULE.get((shift, 2)) or SHIFT_SCHEDULE.get((shift, 0)) or SHIFT_SCHEDULE[('Ca 1', 0)]
+
 def _shift_downtime(shift, tier):
     """(shift_start, shift_end, downtime_intervals) for a (shift, tier), where
     downtime = the scheduled breaks plus the two 5S blocks at each shift end."""
-    sched = SHIFT_SCHEDULE.get((shift, tier)) or SHIFT_SCHEDULE.get((shift, 2)) or SHIFT_SCHEDULE.get((shift, 0)) or SHIFT_SCHEDULE[('Ca 1', 0)]
-    s_start, s_end, breaks = sched
+    s_start, s_end, breaks = _shift_sched(shift, tier)
     five = FIVE_S_MIN / 60.0
     downtime = list(breaks) + [(s_start, s_start + five), (s_end - five, s_end)]
     return s_start, s_end, downtime
@@ -1401,6 +1436,193 @@ def net_hours_for_windows(shift, tier, windows):
         gross = max(0.0, clock_min - dt_min)
         total_net_min += gross * (1 - PFD_RATE)
     return round(total_net_min / 60.0, 2)
+
+# ── Working-time calendar (break-aware ETC) ─────────────────────────────────────
+# The ETC used to be started_at + work hours in plain wall-clock time, so it kept
+# counting through every break, the meal and the 5S blocks. This calendar says,
+# minute by minute, how many of a station's operators are actually PRODUCING:
+# inside their own window, and not in a SHIFT_SCHEDULE break or the 5 min of 5S
+# at either end of their shift. The ETC is then a walk forward through producing
+# time only. It is per operator, not per area, because the schedules are not
+# identical in every case: on a 2h-OT day Ca1 breaks 12:10–12:20 while Ca2 has
+# just started at 12:10 and works through it, so a mixed station keeps going at
+# half pace rather than stopping.
+#
+# PFD (the 6% fatigue allowance in net_hours_for_windows) is deliberately NOT
+# applied here: it is a capacity-planning allowance, while the ETC's work content
+# comes from the time study, which already carries its own allowances.
+ETC_HORIZON_DAYS = 60   # give up (ETC = None) rather than walk forever on a huge order
+
+def _worker_tier(shift_name, ot_clock):
+    """The OT tier that picks a worker's SHIFT_SCHEDULE row: the same bucketing
+    _worker_window uses for their clock window, weekend rule included, so the
+    breaks we skip always belong to the window we show."""
+    if date.today().weekday() >= 5:
+        if ot_clock < WEEKEND_BASE_SHIFT_HOURS:
+            return 0   # partial weekend day: normal-shift breaks, window cut short
+        ot_clock -= WEEKEND_BASE_SHIFT_HOURS
+    return _ot_tier(ot_clock)
+
+def _cut(intervals, cuts):
+    """intervals minus cuts (both lists of (start, end) decimal hours)."""
+    out = []
+    for s, e in intervals:
+        segs = [(s, e)]
+        for cs, ce in cuts:
+            nxt = []
+            for a, b in segs:
+                if ce <= a or cs >= b:
+                    nxt.append((a, b))
+                    continue
+                if a < cs: nxt.append((a, cs))
+                if ce < b: nxt.append((ce, b))
+            segs = nxt
+        out.extend(segs)
+    return sorted(out)
+
+def _union(intervals):
+    out = []
+    for s, e in sorted(intervals):
+        if out and s <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], e))
+        else:
+            out.append((s, e))
+    return out
+
+def shift_work_intervals(shift, tier):
+    """Producing time of a (shift, tier) day in decimal hours: the clock window
+    minus every scheduled break and the 5S block at each end."""
+    s_start, s_end, downtime = _shift_downtime(shift, tier)
+    return _cut([(s_start, s_end)], downtime)
+
+def worker_work_intervals(w):
+    """A roster worker's producing intervals today: their shift's producing time
+    clipped to their own window(s) (a half day or part-day lend keeps only the
+    in-area note segments)."""
+    base = shift_work_intervals(w.get('shift'), w.get('tier', 0))
+    wins = w.get('windows') or [(w.get('start'), w.get('end'))]
+    out = []
+    for ws, we in wins:
+        if ws is None or we is None:
+            continue
+        for a, b in base:
+            s, e = max(a, ws), min(b, we)
+            if e > s:
+                out.append((s, e))
+    return sorted(out)
+
+def worker_downtime_kind(w, h):
+    """'5s' or 'break' if decimal hour h falls in one of the worker's scheduled
+    downtime blocks (inside their window), else None."""
+    s_start, s_end, breaks = _shift_sched(w.get('shift'), w.get('tier', 0))
+    ws, we = w.get('start'), w.get('end')
+    if ws is not None and we is not None and not (ws <= h < we):
+        return None
+    five = FIVE_S_MIN / 60.0
+    if s_start <= h < s_start + five or s_end - five <= h < s_end:
+        return '5s'
+    if any(bs <= h < be for bs, be in breaks):
+        return 'break'
+    return None
+
+def _at(day, h):
+    """date + decimal hour → datetime, snapped to the minute (every schedule and
+    note time is on the minute; this keeps 14.1666… from drifting by a second)."""
+    return datetime(day.year, day.month, day.day) + timedelta(minutes=round(h * 60))
+
+def _crew_segments(crew, day):
+    """[(start_dt, end_dt, n)] — piecewise-constant producing headcount of `crew`
+    (roster worker dicts) on `day`. Gaps (everyone on break) are simply absent."""
+    ivs, pts = [], set()
+    for w in crew:
+        for a, b in worker_work_intervals(w):
+            A, B = _at(day, a), _at(day, b)
+            ivs.append((A, B))
+            pts.update((A, B))
+    pts = sorted(pts)
+    segs = []
+    for A, B in zip(pts, pts[1:]):
+        n = sum(1 for s, e in ivs if s <= A and e >= B)
+        if n:
+            segs.append((A, B, n))
+    return segs
+
+def _continuation_intervals(kind, tier):
+    """Producing time of a whole production day, for the part of a walk that runs
+    past the current crew's shift: Ca1 then Ca2 at the same OT tier (one crew at a
+    time), or HC alone on an HC day."""
+    if kind == 'HC':
+        return shift_work_intervals('HC', tier)
+    return _union(shift_work_intervals('Ca 1', tier) + shift_work_intervals('Ca 2', tier))
+
+def _iter_work_segments(start_dt, crew, today=None):
+    """Yield (A, B, n, is_estimate) producing segments from start_dt onward.
+    Today uses the crew's real windows and breaks. After the last of them ends —
+    and for any earlier or later day — it assumes the same headcount carries on
+    through the normal shift pattern at the same OT tier (is_estimate=True),
+    because nobody knows tomorrow's attendance yet."""
+    today = today or date.today()
+    n_cont = len(crew)
+    if not n_cont:
+        return
+    kind = 'HC' if all(w.get('shift') == 'HC' for w in crew) else 'CA'
+    tier = max(w.get('tier', 0) for w in crew)
+    cont = _continuation_intervals(kind, tier)
+    crew_segs = _crew_segments(crew, today)
+    crew_end = crew_segs[-1][1] if crew_segs else None
+    d = start_dt.date()
+    for _ in range(ETC_HORIZON_DAYS + 1):
+        if d == today and crew_segs:
+            segs = [(A, B, n, False) for A, B, n in crew_segs]
+            segs += [(max(_at(d, a), crew_end), _at(d, b), n_cont, True)
+                     for a, b in cont if _at(d, b) > crew_end]
+        else:
+            segs = [(_at(d, a), _at(d, b), n_cont, True) for a, b in cont]
+        for A, B, n, est in segs:
+            if B <= start_dt:
+                continue
+            yield max(A, start_dt), B, n, est
+        d += timedelta(days=1)
+
+def walk_work(start_dt, person_hours, crew, today=None):
+    """Where `person_hours` of work started at start_dt ends, walking through the
+    crew's producing time only. Returns {'end', 'estimate', 'crew_end'} or None
+    (no crew, or past the horizon). 'estimate' = the walk ran past the crew's
+    shift on the carry-on assumption above. 'crew_end' = when today's crew stops."""
+    if not crew:
+        return None
+    crew_segs = _crew_segments(crew, today or date.today())
+    crew_end = crew_segs[-1][1] if crew_segs else None
+    left = max(0.0, float(person_hours)) * 60.0   # person-minutes
+    est = False
+    if left <= 0:
+        return {'end': start_dt, 'estimate': False, 'crew_end': crew_end}
+    for A, B, n, seg_est in _iter_work_segments(start_dt, crew, today):
+        cap = (B - A).total_seconds() / 60.0 * n
+        if cap >= left:
+            return {'end': A + timedelta(minutes=left / n),
+                    'estimate': est or seg_est, 'crew_end': crew_end}
+        left -= cap
+        est = est or seg_est
+    return None
+
+def work_done_between(start_dt, end_dt, crew, today=None):
+    """Person-hours the crew could produce between two moments (the same walk,
+    measured instead of consumed). Used to carry progress across a crew change."""
+    total = 0.0
+    if end_dt <= start_dt:
+        return 0.0
+    for A, B, n, _est in _iter_work_segments(start_dt, crew, today):
+        if A >= end_dt:
+            break
+        total += (min(B, end_dt) - A).total_seconds() / 60.0 * n
+    return total / 60.0
+
+def producing_now(crew, now=None):
+    """How many of the crew are producing at this minute (0 during a shared break)."""
+    now = now or datetime.now()
+    h = now.hour + now.minute / 60
+    return sum(1 for w in crew if any(a <= h < b for a, b in worker_work_intervals(w)))
 
 # Time-window note parser. A red-corner Excel comment on a worker's status cell
 # can spell out the actual hours worked and where, e.g.:
@@ -1741,6 +1963,10 @@ def get_available_workers(area='PK'):
             'start': start, 'end': end,
             'active': start <= now_decimal <= end,
             'note': w.get('note', ''), 'note_kind': w.get('note_kind', ''),
+            # For the break-aware ETC: which SHIFT_SCHEDULE row's breaks apply,
+            # and the in-area note segments of a partial day.
+            'tier': _worker_tier(w['shift'], w.get('ot_clock', 0)),
+            'windows': [list(x) for x in (w.get('windows') or [])],
         })
     return roster
 
@@ -2052,6 +2278,16 @@ def refresh_fg_and_advance():
     except Exception as e:
         print(f'[shift phase error] {e}')
 
+    # Re-anchor ETC timers on this poll's signals (reset / scan / crew change).
+    # Last, so it sees the shift reset, the worker prune and the fresh FG data.
+    try:
+        with _cache_lock:
+            _tmr = load_timers()
+            if retime_timers(_tmr, load_assignments(), load_workers_assigned()):
+                save_timers(_tmr)
+    except Exception as e:
+        print(f'[timer retime error] {e}')
+
     total = time.perf_counter() - _mark0
     if total >= 1.0:  # don't spam the console for fast no-op cycles
         breakdown = ' | '.join(f'{k} {v:.1f}s' for k, v in _t.items() if v >= 0.05)
@@ -2063,37 +2299,172 @@ def _fg_poll_loop():
         refresh_fg_and_advance()
 
 # ── ETC helpers ────────────────────────────────────────────────────────────────
-def calc_etc(finished_hrs, remaining_qty, total_qty, worker_count, started_at_iso):
-    """Return ISO timestamp of estimated completion for the CURRENT order only."""
-    if not finished_hrs or not total_qty or not worker_count or not started_at_iso:
-        return None
-    hrs_per_unit = finished_hrs / total_qty
-    remaining_hrs = hrs_per_unit * remaining_qty / max(worker_count, 1)
-    started = datetime.fromisoformat(started_at_iso)
-    etc = started.timestamp() + remaining_hrs * 3600
-    return datetime.fromtimestamp(etc).isoformat()
+# A station's timer is ANCHORED: (anchor_at, anchor_ph) = when the current block
+# of work started and how many person-hours were left at that moment, and the
+# ETC is walk_work(anchor_at, anchor_ph, crew) through producing time only.
+# The old ETC was started_at + hours(LIVE remaining_qty), which counted finished
+# work twice — once as elapsed time, again as a smaller remainder — so a station
+# working exactly on pace hit 00:00 about half-way through the order.
+# The anchor moves on exactly three signals, all in a write path (retime_timers):
+#   reset — started_at changed: order placed / promoted / moved, crew back after
+#           "no worker", shift change. Work left = live remaining_qty.
+#   scan  — remaining_qty changed (FG scan or WIP entry). Anchored at the scan's
+#           own SQL time when it has one, so the 60s detection lag isn't counted.
+#   crew  — the station's operator list changed. Work done so far is carried
+#           over at the OLD crew's pace, then the walk continues with the new one.
+# Every signal is logged (timer_log_{AREA}.json, today only) for the debug screen.
+TIMER_LOG_MAX_PER_STATION = 120
+# A reset is picked up by the next 60s poll; anything older than this with no
+# anchor at all can only be a timer from a build before the anchors existed.
+RETIME_FRESH_RESET = timedelta(minutes=5)
+_timer_log = None   # {'date': 'YYYY-MM-DD', 'stations': {sid: [event, ...]}} — loaded lazily
 
-def calc_queue_clear(ip_pdo, queue_pdos, worker_count, started_at_iso):
-    """Return ISO timestamp when the ENTIRE station queue (current + all queued) clears.
-    Returns None when unstaffed — an estimate assuming a phantom worker is misleading."""
-    if not worker_count:
+def _hpu(p):
+    """Standard person-hours per unit for a PDO (0 when it has no time study)."""
+    if p and p.get('qty') and p.get('finished_hrs'):
+        return p['finished_hrs'] / p['qty']
+    return 0.0
+
+def _station_crew(worker_ids):
+    """Roster dicts for a station's assigned worker ids. Today's FULL roster, so a
+    pre-assigned next-shift operator comes with their future window and starts
+    counting the minute their shift does."""
+    by_id = {str(w['id']): w for w in _worker_cache}
+    return [by_id[str(i)] for i in worker_ids if str(i) in by_id]
+
+def _parse_dt(s):
+    try:
+        return datetime.fromisoformat(s) if s else None
+    except (TypeError, ValueError):
         return None
-    total_hrs = 0.0
-    # Remaining hours on current in-progress order (same math whether or not it
-    # has a start timestamp — the timestamp only shifts the base time below).
-    if ip_pdo:
-        hrs_per_unit = (ip_pdo['finished_hrs'] / ip_pdo['qty']) if ip_pdo.get('qty') else 0
-        total_hrs += hrs_per_unit * ip_pdo.get('remaining_qty', 0) / worker_count
-    # Full hours for every queued order (not yet started, so full remaining_qty)
-    for p in queue_pdos:
-        if not p: continue
-        hrs_per_unit = (p['finished_hrs'] / p['qty']) if p.get('qty') else 0
-        total_hrs += hrs_per_unit * p.get('remaining_qty', 0) / worker_count
-    if total_hrs <= 0:
+
+def _anchor_valid(timer, ip_id):
+    started = _parse_dt(timer.get('started_at'))
+    a_at = _parse_dt(timer.get('anchor_at'))
+    return bool(a_at and started and a_at >= started and timer.get('anchor_pdo') == ip_id)
+
+def timer_anchor(timer, ip_pdo):
+    """(anchor_dt, person_hours_left_then, kind) for a station's current block.
+    Uses the stored anchor while it is still about this order and not older than
+    the last reset; otherwise the reset itself with live remaining — exactly what
+    the next poll will store, so a board GET in between already shows it."""
+    if not ip_pdo or not timer:
         return None
-    base_time = datetime.fromisoformat(started_at_iso) if started_at_iso else datetime.now()
-    clear_ts = base_time.timestamp() + total_hrs * 3600
-    return datetime.fromtimestamp(clear_ts).isoformat()
+    if _anchor_valid(timer, ip_pdo['id']):
+        return (_parse_dt(timer['anchor_at']), float(timer.get('anchor_ph') or 0),
+                timer.get('anchor_reason') or 'reset')
+    started = _parse_dt(timer.get('started_at'))
+    if not started:
+        return None
+    return started, _hpu(ip_pdo) * ip_pdo.get('remaining_qty', 0), 'reset'
+
+def station_timing(ip_pdo, queue_pdos, timer, crew, now=None):
+    """One station's clock, for both the board snapshot and the debug screen:
+    anchor, ETC of the running order, queue-clear time, and how many of the crew
+    are producing this minute. Read-only."""
+    now = now or datetime.now()
+    out = {'anchor': None, 'kind': None, 'ph': None, 'etc': None, 'clear': None,
+           'estimate': False, 'crew_end': None, 'producing': producing_now(crew, now)}
+    a = timer_anchor(timer, ip_pdo)
+    if not a or not crew:
+        return out
+    at, ph, kind = a
+    out.update(anchor=at, kind=kind, ph=ph)
+    if _hpu(ip_pdo):
+        w = walk_work(at, ph, crew)
+        if w:
+            out.update(etc=w['end'], estimate=w['estimate'], crew_end=w['crew_end'])
+    q_ph = sum(_hpu(p) * p.get('remaining_qty', 0) for p in queue_pdos if p)
+    if ph + q_ph > 0:
+        wc = walk_work(at, ph + q_ph, crew)
+        if wc:
+            out['clear'] = wc['end']
+    return out
+
+def _timer_log_today():
+    global _timer_log
+    today = date.today().isoformat()
+    if _timer_log is None:
+        _timer_log = load_json(f'timer_log_{AREA}.json', {})
+    if _timer_log.get('date') != today:
+        _timer_log = {'date': today, 'stations': {}}
+    return _timer_log
+
+def _log_timer_event(station, ev):
+    lst = _timer_log_today()['stations'].setdefault(station, [])
+    lst.append(ev)
+    del lst[:-TIMER_LOG_MAX_PER_STATION]
+
+def _latest_signal_time(pdo_id):
+    """Newest FG scan / WIP entry time in SQL for a PO (a split child uses its
+    parent's PO), or None."""
+    parent, _ = parse_split_id(pdo_id)
+    po = parent or pdo_id
+    times = [ts for (p, _s), ts in _fg_latest_scan_cache.items() if p == po]
+    times += [v[1] for (p, _s), v in _wip_cache.items()
+              if p == po and isinstance(v, (tuple, list)) and len(v) > 1]
+    times = [t for t in times if isinstance(t, datetime)]
+    return max(times) if times else None
+
+def retime_timers(timers, assignments, workers_asgn, now=None):
+    """Move each in-progress station's anchor on a reset / scan / crew signal and
+    log it. WRITE path: the 60s poll and the staffing API call this, the snapshot
+    never does (guard #1). Mutates `timers`; returns True if anything changed so
+    the caller saves."""
+    now = now or datetime.now()
+    changed = False
+    for station, bins in assignments.items():
+        ip_id = bins.get('inprogress')
+        timer = timers.get(station)
+        ip = pdo_by_id(ip_id) if ip_id else None
+        if not ip or not timer or not _parse_dt(timer.get('started_at')):
+            continue
+        rem = ip.get('remaining_qty', 0)
+        hpu = _hpu(ip)
+        crew_ids = sorted(str(i) for i in workers_asgn.get(station, []))
+        a_at = _parse_dt(timer.get('anchor_at'))
+        if not _anchor_valid(timer, ip_id):
+            started = _parse_dt(timer['started_at'])
+            at, ph, kind = started, hpu * rem, 'reset'
+            reason = timer.get('reset_reason') or (
+                'order started' if timer.get('anchor_pdo') != ip_id else 'timer reset')
+            if 'anchor_at' not in timer and now - started > RETIME_FRESH_RESET:
+                # A timer written by a build before .15 (no anchor yet): its
+                # started_at may be hours old, and pairing that with today's
+                # remaining_qty is the very double-count this replaces. Start
+                # the block now instead. Once per station, on the first poll.
+                at, reason = now, 'anchored on update (old timer)'
+        elif rem != timer.get('anchor_rem'):
+            prev = timer.get('anchor_rem')
+            ph = hpu * rem
+            kind = 'scan' if (prev is not None and rem < prev) else 'qty'
+            sig = _latest_signal_time(ip_id) if kind == 'scan' else None
+            at = sig if (sig and a_at < sig <= now) else now
+            reason = f'remaining {prev} → {rem}'
+        elif crew_ids != (timer.get('crew') or []):
+            old = _station_crew(timer.get('crew') or [])
+            done = work_done_between(a_at, now, old) if old else 0.0
+            at, kind = now, 'crew'
+            ph = max(0.0, float(timer.get('anchor_ph') or 0) - done)
+            reason = f"crew {len(timer.get('crew') or [])} → {len(crew_ids)}"
+        else:
+            continue
+        timer.update({'anchor_at': at.isoformat(), 'anchor_ph': round(ph, 4),
+                      'anchor_rem': rem, 'anchor_pdo': ip_id,
+                      'anchor_reason': kind, 'crew': crew_ids})
+        w = walk_work(at, ph, _station_crew(crew_ids)) if hpu else None
+        _log_timer_event(station, {
+            't': at.isoformat(timespec='seconds'),
+            'seen': now.isoformat(timespec='seconds'),
+            'kind': kind, 'reason': reason, 'pdo': ip_id, 'rem': rem,
+            'ph': round(ph, 3), 'crew_n': len(crew_ids),
+            'end': w['end'].isoformat(timespec='seconds') if w else None,
+            'estimate': bool(w and w['estimate']),
+        })
+        changed = True
+    if changed:
+        save_json(f'timer_log_{AREA}.json', _timer_log_today())
+    return changed
 
 def pdo_by_id(pdo_id):
     # No lock here — callers that need thread safety hold the lock themselves
@@ -2277,6 +2648,7 @@ def sync_timer_pause_state(station, worker_count, timers):
             timer['started_at'] = datetime.now().isoformat()
             timer['fg_count'] = 0
             timer['paused'] = False
+            timer['reset_reason'] = 'crew back after no worker'
             return True
         return False
 
@@ -2298,6 +2670,7 @@ def reset_all_timers_for_new_shift():
                     'started_at': now_iso,
                     'fg_count': 0,
                     'paused': _count_active_workers(station, workers_asgn) == 0,
+                    'reset_reason': 'shift change',
                 }
                 changed = True
         if changed:
@@ -2457,27 +2830,17 @@ def build_board_snapshot(area):
             # pre-assigned upcoming (next-shift) worker shouldn't make the clock
             # tick until they're really on the floor.
             active_count = _count_active_workers(sid, workers_asgn)
+            crew = _station_crew(workers_asgn.get(sid, []))
+            tm = station_timing(ip_pdo, queue_pdos, timer, crew) if ip_pdo else None
             # The ETC clock only RUNS during production hours with an active
-            # worker. Outside production hours it FREEZES (off_hours); with no
-            # active worker it's paused. Either way the countdown stops ticking.
-            running = bool(ip_pdo) and active_count > 0 and in_prod
+            # worker who is producing this minute. Outside production hours it
+            # FREEZES (off_hours); with no active worker it's paused; with every
+            # active worker in a break / meal / 5S block it's paused for that.
+            on_break = bool(ip_pdo) and active_count > 0 and in_prod and tm['producing'] == 0
+            running = bool(ip_pdo) and active_count > 0 and in_prod and not on_break
 
-            etc_iso = None
-            if running and timer.get('started_at'):
-                etc_iso = calc_etc(
-                    ip_pdo['finished_hrs'],
-                    ip_pdo['remaining_qty'],
-                    ip_pdo['qty'],
-                    active_count,
-                    timer['started_at']
-                )
-
-            clear_iso = None
-            if running and (ip_pdo or queue_pdos):
-                clear_iso = calc_queue_clear(
-                    ip_pdo, queue_pdos, active_count,
-                    timer.get('started_at') or datetime.now().isoformat()
-                )
+            etc_iso = tm['etc'].isoformat() if (running and tm['etc']) else None
+            clear_iso = tm['clear'].isoformat() if (running and tm['clear']) else None
 
             # Static remaining-work estimate shown while frozen/paused (so the
             # value is held, not blanked). Uses active workers, or the assigned
@@ -2491,8 +2854,18 @@ def build_board_snapshot(area):
 
             off_hours = bool(ip_pdo) and not in_prod
             # Paused: in progress but the clock isn't running (no active worker,
-            # or outside production hours).
+            # a shared break, or outside production hours).
             paused = bool(ip_pdo) and not running
+            pause_reason = None
+            if paused:
+                if off_hours:
+                    pause_reason = 'off_hours'
+                elif on_break:
+                    _h = datetime.now().hour + datetime.now().minute / 60
+                    kinds = {worker_downtime_kind(w, _h) for w in crew}
+                    pause_reason = '5s' if '5s' in kinds else 'break'
+                else:
+                    pause_reason = 'no_worker'
 
             board_out[sid] = {
                 'inprogress': ip_pdo,
@@ -2505,6 +2878,9 @@ def build_board_snapshot(area):
                     'fg_count':     timer.get('fg_count', 0),
                     'paused':       paused,
                     'off_hours':    off_hours,
+                    # off_hours | break | 5s | no_worker — None while running.
+                    'pause_reason': pause_reason,
+                    'etc_estimate': bool(running and tm['estimate']),
                     'remaining_min': remaining_min,
                 }
             }
@@ -2535,6 +2911,124 @@ def api_board(area):
         return jsonify({'error': 'unknown area'}), 404
     threading.Thread(target=refresh_cache, daemon=True).start()
     return jsonify(build_board_snapshot(area))
+
+# ── Timer debug screen (local /debug + shared {AREA}_debug.js) ─────────────────
+def _hm_str(h):
+    m = round(h * 60)
+    return f'{m // 60:02d}:{m % 60:02d}'
+
+def _iso(dt):
+    return dt.isoformat(timespec='seconds') if dt else None
+
+def _stopped_minutes(start_dt, end_dt, crew):
+    """Wall-clock minutes between two moments in which nobody on the crew was
+    producing — the break / meal / 5S / off-shift time the ETC skipped."""
+    if not start_dt or not end_dt or end_dt <= start_dt:
+        return 0
+    worked = 0.0
+    for A, B, _n, _e in _iter_work_segments(start_dt, crew):
+        if A >= end_dt:
+            break
+        worked += (min(B, end_dt) - A).total_seconds() / 60.0
+    return round((end_dt - start_dt).total_seconds() / 60.0 - worked)
+
+def build_timer_debug(area):
+    """Per-station timer detail for the debug screen: when the current block of
+    work started and why, the work it carried, the break-aware planned end, the
+    queue chained behind it, the crew's producing state, and today's signal log.
+    READ-ONLY, same contract as build_board_snapshot (guard #1)."""
+    now = datetime.now()
+    h_now = now.hour + now.minute / 60
+    with _cache_lock:
+        snap = build_board_snapshot(area)
+        workers_asgn = load_workers_assigned()
+        timers = load_timers()
+        log = _timer_log_today()['stations']
+        stations = []
+        for sid in _station_cache:
+            b = snap['board'].get(sid) or {}
+            ip = b.get('inprogress')
+            queue_pdos = b.get('queue') or []
+            t = b.get('timer') or {}
+            timer = timers.get(sid, {})
+            crew = _station_crew(workers_asgn.get(sid, []))
+            if not ip:
+                state = 'idle'
+            elif t.get('paused'):
+                state = t.get('pause_reason') or 'paused'
+            else:
+                state = 'running'
+            row = {
+                'id': sid, 'state': state,
+                'pdo': ({'id': ip['id'], 'part': ip.get('part'), 'qty': ip.get('qty'),
+                         'remaining': ip.get('remaining_qty'),
+                         'min_per_unit': round(_hpu(ip) * 60, 3)} if ip else None),
+                'crew': [{
+                    'id': w['id'], 'name': w.get('name'), 'shift': w.get('shift'),
+                    'tier': w.get('tier', 0),
+                    'window': (f"{_hm_str(w['start'])}–{_hm_str(w['end'])}"
+                               if w.get('start') is not None and w.get('end') is not None else ''),
+                    'producing': any(a <= h_now < b2 for a, b2 in worker_work_intervals(w)),
+                    'downtime': worker_downtime_kind(w, h_now),
+                } for w in crew],
+                'last_reset': timer.get('started_at'),
+                'events': list(log.get(sid, [])),
+                'block': None, 'queue': [],
+            }
+            if ip:
+                tm = station_timing(ip, queue_pdos, timer, crew, now)
+                if tm['anchor']:
+                    left_ph = max(0.0, tm['ph'] - work_done_between(tm['anchor'], now, crew)) if crew else tm['ph']
+                    row['block'] = {
+                        'start': _iso(tm['anchor']), 'kind': tm['kind'],
+                        'work_min': round(tm['ph'] * 60),          # person-minutes at block start
+                        'left_min': round(left_ph * 60),           # person-minutes still to do (by the plan)
+                        'end': _iso(tm['etc']), 'estimate': tm['estimate'],
+                        'crew_end': _iso(tm['crew_end']),
+                        'stopped_min': _stopped_minutes(tm['anchor'], tm['etc'], crew),
+                        'queue_clear': _iso(tm['clear']),
+                    }
+                    cursor = tm['etc']
+                    for q in queue_pdos:
+                        if not cursor or not crew:
+                            break
+                        w = walk_work(cursor, _hpu(q) * q.get('remaining_qty', 0), crew)
+                        row['queue'].append({'id': q['id'], 'part': q.get('part'),
+                                             'remaining': q.get('remaining_qty'),
+                                             'start': _iso(cursor), 'end': _iso(w['end']) if w else None,
+                                             'estimate': bool(w and w['estimate'])})
+                        cursor = w['end'] if w else None
+            stations.append(row)
+        tiers = sorted({(w.get('shift'), w.get('tier', 0)) for w in _worker_cache},
+                       key=lambda x: (str(x[0]), x[1]))
+        schedule = []
+        for shift, tier in tiers:
+            s_start, s_end, breaks = _shift_sched(shift, tier)
+            schedule.append({'shift': shift, 'tier': tier,
+                             'window': f'{_hm_str(s_start)}–{_hm_str(s_end)}',
+                             'breaks': [f'{_hm_str(a)}–{_hm_str(b2)}' for a, b2 in breaks],
+                             'five_s_min': FIVE_S_MIN})
+    return {
+        'area': area, 'area_label': _area_label, 'build': BUILD_VERSION,
+        'now': _iso(now), 'ts': now.strftime('%H:%M:%S'),
+        'in_production': snap.get('in_production'), 'dev_mode': DEV_MODE,
+        'overdue_grace_min': OVERDUE_GRACE_MIN,
+        'schedule': schedule, 'stations': stations,
+    }
+
+@app.route('/debug')
+def debug_page():
+    # The SAME file the share uses: served over http it reads /api/debug for
+    # this area; opened off the share (file://) it reads all three *_debug.js.
+    return send_from_directory(BASE_DIR, 'shared_debug.html')
+
+@app.route('/api/debug')
+def api_debug():
+    try:
+        return jsonify(build_timer_debug(AREA))
+    except Exception as e:
+        print(f'[api_debug error] {e}')
+        return jsonify({'error': str(e)}), 500
 
 # ── API: report view — full PDO list with live assignment status ───────────────
 @app.route('/api/report/pdos')
@@ -3409,6 +3903,9 @@ def api_workers_assign():
             sync_timer_pause_state(station, _count_active_workers(station, workers_asgn), timers)
             for sid in affected:
                 sync_timer_pause_state(sid, _count_active_workers(sid, workers_asgn), timers)
+            # Re-anchor NOW, while the stored crew is still the old one, so the
+            # work done before this change is credited at the old crew's pace.
+            retime_timers(timers, load_assignments(), workers_asgn)
             save_timers(timers)
         return jsonify({'ok': True})
     except Exception as e:
@@ -4473,6 +4970,17 @@ def _build_console_ui(root, start_backend):
                                cursor='hand2', state='disabled')
     open_dash_btn.pack(side='left', padx=(10, 0))
 
+    def open_timer_debug():
+        try:
+            webbrowser.open('http://127.0.0.1:5050/debug', new=2)
+        except Exception as e:
+            messagebox.showerror('Could not open browser', str(e))
+
+    timer_dbg_btn = tk.Button(toolbar, text='⏱  Timer Debug', command=open_timer_debug, bg=entry_bg, fg=muted,
+                              relief='flat', font=('Segoe UI', 9, 'bold'), padx=12, pady=3,
+                              cursor='hand2', state='disabled')
+    timer_dbg_btn.pack(side='left', padx=(8, 0))
+
     def mark_ready():
         # Called via root.after() from the backend thread's on_ready callback
         # once initialize_app() has actually finished (Excel/SQL init done) —
@@ -4481,6 +4989,7 @@ def _build_console_ui(root, start_backend):
         status_var.set('●  RUNNING')
         status_lbl.configure(fg=accent)
         open_dash_btn.configure(fg=accent, state='normal')
+        timer_dbg_btn.configure(fg=fg, state='normal')
 
     def shutdown_server():
         if messagebox.askyesno('Shut down server?',

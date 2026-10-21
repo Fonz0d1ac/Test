@@ -896,6 +896,8 @@ const I18N = {
     no_workers_match: 'No workers match',
     no_pdos_match: 'No PDOs match',
     paused_no_worker: 'Paused — no worker',
+    paused_break: 'Paused — break',
+    paused_5s: 'Paused — 5S',
     off_hours: 'Frozen — outside production hours',
     note_title: 'Note',
     excel_note_label: 'Excel note (read-only)',
@@ -993,6 +995,8 @@ const I18N = {
     no_workers_match: 'Không tìm thấy công nhân',
     no_pdos_match: 'Không tìm thấy PDO',
     paused_no_worker: 'Tạm dừng — chưa có công nhân',
+    paused_break: 'Tạm dừng — giờ nghỉ',
+    paused_5s: 'Tạm dừng — 5S',
     off_hours: 'Đóng băng — ngoài giờ sản xuất',
     note_title: 'Ghi chú',
     excel_note_label: 'Ghi chú Excel (chỉ đọc)',
@@ -1997,11 +2001,15 @@ function wireStationEvents(col, sid, st) {
 
   const timer = st.timer||{};
   if (timer.paused) {
-    // Frozen: outside production hours OR no active worker. Hold the remaining
-    // estimate (doesn't tick) with a reason label instead of a live countdown.
+    // Frozen: outside production hours, no active worker, or everyone on a
+    // break / 5S block. Hold the remaining estimate (doesn't tick) with a
+    // reason label instead of a live countdown.
     const etcEl = document.getElementById(`etc-${sid}`);
     const qcEl  = document.getElementById(`qc-${sid}`);
-    const reason = timer.off_hours ? t('off_hours') : t('paused_no_worker');
+    const reason = timer.off_hours ? t('off_hours')
+                 : timer.pause_reason === 'break' ? t('paused_break')
+                 : timer.pause_reason === '5s'    ? t('paused_5s')
+                 : t('paused_no_worker');
     const est = (timer.remaining_min!=null) ? `~${fmtMinutes(timer.remaining_min)} · ` : '';
     if (etcEl) { etcEl.textContent = est + reason; etcEl.className = 'etc-val'; }
     if (qcEl)  { qcEl.textContent  = reason; qcEl.className  = 'etc-val'; }

@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Timer debug screen. ONE file, two ways in:
+       • http://127.0.0.1:5050/debug on a board PC → this area only, via /api/debug.
+       • opened off the share (file://) → all three areas, via the {PK,AD,RP}_debug.js
+         files each board writes every ~15s (hidden-iframe loader, same trick as
+         shared_dashboard.html: fetch() is CORS-blocked from file://, <script src> is not).
+     Read-only: nothing on this page can change a board. -->
+<title>Timer Debug</title>
+<style>
+:root{
+  --bg:#0d1017;--panel:#161b26;--panel2:#1d2431;--border:#2a3342;--border2:#3a465a;
+  --text:#f2f5fb;--text2:#aab3c5;--text3:#6b7688;
+  --green:#2fdb96;--green-bg:rgba(47,219,150,.14);
+  --amber:#ffb92e;--amber-bg:rgba(255,185,46,.14);
+  --red:#ff5d5d;--red-bg:rgba(255,93,93,.14);
+  --blue:#5aa6ff;--blue-bg:rgba(90,166,255,.14);
+  --purple:#bd93f0;--purple-bg:rgba(189,147,240,.14);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  font-size:14px;padding-bottom:24px;overflow-x:hidden}
+.topbar{position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;align-items:center;gap:12px 18px;
+  padding:10px 16px;background:linear-gradient(180deg,#111624,#0d1017);border-bottom:1px solid var(--border)}
+.title{font-size:20px;font-weight:700;letter-spacing:.05em}
+.clock{font-family:Consolas,monospace;font-size:18px;color:var(--text2)}
+.spacer{flex:1}
+.ctl{display:flex;gap:6px;align-items:center;color:var(--text2);font-size:13px}
+.ctl button{background:var(--panel2);color:var(--text2);border:1px solid var(--border);border-radius:6px;
+  padding:5px 10px;font:inherit;cursor:pointer}
+.ctl button.on{background:var(--blue-bg);color:var(--blue);border-color:var(--blue)}
+.ctl label{display:flex;gap:6px;align-items:center;cursor:pointer}
+main{padding:12px 16px;display:flex;flex-direction:column;gap:18px}
+section{min-width:0}
+.area-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px;margin-bottom:8px}
+.area-h h2{font-size:18px;letter-spacing:.06em}
+.muted{color:var(--text3)}
+.warn{color:var(--amber)}
+.bad{color:var(--red)}
+.sched{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.chip{background:var(--panel2);border:1px solid var(--border);border-radius:999px;padding:3px 10px;
+  font-size:12px;color:var(--text2);overflow-wrap:anywhere}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,460px),1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 14px;
+  display:flex;flex-direction:column;gap:10px;min-width:0}
+.card.overdue{border-color:var(--red)}
+.card-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sid{font-size:17px;font-weight:700}
+.pill{font-size:11px;font-weight:700;letter-spacing:.06em;border-radius:999px;padding:2px 9px}
+.st-running{background:var(--green-bg);color:var(--green)}
+.st-break,.st-5s{background:var(--purple-bg);color:var(--purple)}
+.st-no_worker,.st-off_hours,.st-paused{background:var(--amber-bg);color:var(--amber)}
+.st-idle{background:var(--panel2);color:var(--text3)}
+.pdo{color:var(--text2);overflow-wrap:anywhere}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+.kv{background:var(--panel2);border-radius:8px;padding:7px 9px;min-width:0}
+.kv .k{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em}
+.kv .v{font-size:16px;font-weight:600;font-family:Consolas,monospace;overflow-wrap:anywhere}
+.kv .s{font-size:12px;color:var(--text2);overflow-wrap:anywhere}
+.v.ok{color:var(--green)}.v.soon{color:var(--amber)}.v.late{color:var(--red)}
+.crew{display:flex;flex-wrap:wrap;gap:6px}
+.op{font-size:12px;border-radius:6px;padding:3px 8px;background:var(--panel2);border:1px solid var(--border)}
+.op.prod{border-color:var(--green)}
+.op .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;background:var(--text3)}
+.op.prod .dot{background:var(--green)}
+details{background:var(--panel2);border-radius:8px;padding:6px 9px}
+summary{cursor:pointer;color:var(--text2);font-size:13px}
+.tw{overflow-x:auto;margin-top:6px}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--border);white-space:nowrap}
+th{color:var(--text3);font-weight:600}
+td.wrap{white-space:normal;overflow-wrap:anywhere;min-width:120px}
+.k-reset{color:var(--blue)}.k-scan{color:var(--green)}.k-crew{color:var(--amber)}.k-qty{color:var(--purple)}
+.empty{color:var(--text3);padding:6px 0}
+.note{color:var(--text3);font-size:12px;max-width:900px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="title">⏱ TIMER DEBUG</div>
+  <div class="clock" id="clock">--:--:--</div>
+  <div class="spacer"></div>
+  <div class="ctl" id="areaBtns"></div>
+  <div class="ctl"><label><input type="checkbox" id="showPaused"> show paused &amp; idle</label></div>
+</div>
+<main id="main"><div class="empty">Loading…</div></main>
+<iframe id="loader" style="display:none" aria-hidden="true"></iframe>
+
+<script>
+const AREA_ORDER = ['PK','AD','RP'];
+const AREA_LABEL = {PK:'PACKAGING', AD:'ASSEMBLY', RP:'RAW PART'};
+const STALE_SEC = 60;            // boards write this feed every ~15s
+const REFRESH_MS = 15000;
+const HTTP = location.protocol.startsWith('http');
+const STATE_LABEL = {running:'RUNNING', break:'BREAK', '5s':'5S', no_worker:'NO WORKER',
+                     off_hours:'OFF HOURS', paused:'PAUSED', idle:'IDLE'};
+const KIND_LABEL = {reset:'RESET', scan:'SCAN', crew:'CREW', qty:'QTY CHANGE'};
+
+let DBG = {};                    // {AREA: debug payload}
+let areaFilter = 'ALL';
+let showPaused = false;
+try { showPaused = localStorage.getItem('tdbg_paused') === '1'; } catch(e) {}
+try { areaFilter = localStorage.getItem('tdbg_area') || 'ALL'; } catch(e) {}
+
+function esc(s){
+  if(s===null||s===undefined) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function hm(iso){
+  if(!iso) return '—';
+  const d = new Date(iso);
+  if(isNaN(d)) return '—';
+  const s = d.toTimeString().slice(0,5);
+  const today = new Date(); today.setHours(0,0,0,0);
+  const day = new Date(d); day.setHours(0,0,0,0);
+  const dd = Math.round((day - today) / 86400000);
+  return dd === 0 ? s : `${s} <span class="muted">(${dd>0?'+':''}${dd}d)</span>`;
+}
+function dur(min){
+  if(min===null||min===undefined||isNaN(min)) return '—';
+  const neg = min < 0; min = Math.abs(Math.round(min));
+  const h = Math.floor(min/60), m = min%60;
+  return (neg?'−':'') + (h ? `${h}h ${m}m` : `${m}m`);
+}
+function minsBetween(aIso, bIso){
+  if(!aIso || !bIso) return null;
+  return (new Date(bIso) - new Date(aIso)) / 60000;
+}
+
+// ── Rendering ────────────────────────────────────────────────────────────────
+function renderAreaButtons(){
+  const areas = HTTP ? Object.keys(DBG) : AREA_ORDER;
+  if (HTTP) { document.getElementById('areaBtns').innerHTML = ''; return; }
+  document.getElementById('areaBtns').innerHTML = ['ALL', ...areas].map(a =>
+    `<button class="${areaFilter===a?'on':''}" data-a="${a}">${a}</button>`).join('');
+}
+
+function leftCell(st, grace){
+  const b = st.block;
+  if (st.state !== 'running' || !b || !b.end) return {txt: '—', cls: '', late: false};
+  const left = (new Date(b.end) - new Date()) / 60000;
+  if (left > 0) return {txt: dur(left), cls: left < 30 ? 'soon' : 'ok', late: false};
+  const late = -left >= grace;
+  return {txt: late ? `OVERDUE ${dur(-left)}` : `00:00 (+${dur(-left)})`, cls: 'late', late};
+}
+
+function renderStation(st, grace){
+  const b = st.block, p = st.pdo;
+  const lc = leftCell(st, grace);
+  const crewN = st.crew.length;
+  const crewHtml = st.crew.length ? st.crew.map(w =>
+    `<span class="op ${w.producing?'prod':''}" title="${esc(w.id)}"><span class="dot"></span>${esc(w.name||w.id)}
+      · ${esc(w.shift)}${w.tier?` OT${w.tier}`:''} · ${esc(w.window)}${w.downtime?` · <b>${w.downtime==='5s'?'5S':'break'}</b>`:''}</span>`
+  ).join('') : '<span class="muted">no operator assigned</span>';
+
+  let grid = '';
+  if (b) {
+    const perOp = crewN ? b.work_min / crewN : null;
+    grid = `<div class="grid">
+      <div class="kv"><div class="k">Block started</div><div class="v">${hm(b.start)}</div>
+        <div class="s">${esc(KIND_LABEL[b.kind]||b.kind||'')}</div></div>
+      <div class="kv"><div class="k">Work at start</div><div class="v">${dur(perOp)}</div>
+        <div class="s">${b.work_min} person-min · ${crewN} op</div></div>
+      <div class="kv"><div class="k">Supposed end</div><div class="v">${hm(b.end)}</div>
+        <div class="s">${b.estimate?'<span class="warn">est. — runs past crew shift</span>':'with current crew'}</div></div>
+      <div class="kv"><div class="k">Time left</div><div class="v ${lc.cls}">${lc.txt}</div>
+        <div class="s">${b.left_min} person-min by plan</div></div>
+      <div class="kv"><div class="k">Breaks skipped</div><div class="v">${dur(b.stopped_min)}</div>
+        <div class="s">break / meal / 5S in block</div></div>
+      <div class="kv"><div class="k">Last reset</div><div class="v">${hm(st.last_reset)}</div>
+        <div class="s">crew shift ends ${hm(b.crew_end)}</div></div>
+    </div>`;
+  } else if (p) {
+    grid = `<div class="muted">No anchor yet (no time study, or no crew).</div>`;
+  }
+
+  const qRows = (st.queue||[]).map(q => `<tr><td>${esc(q.id)}</td><td class="wrap">${esc(q.part||'')}</td>
+      <td>${esc(q.remaining)}</td><td>${hm(q.start)}</td><td>${hm(q.end)}${q.estimate?' <span class="warn">est.</span>':''}</td></tr>`).join('');
+  const queueHtml = qRows ? `<details><summary>Queue (${st.queue.length}) — clears ${hm(b && b.queue_clear)}</summary>
+      <div class="tw"><table><tr><th>PDO</th><th>Part</th><th>Rem.</th><th>Start</th><th>Supposed end</th></tr>${qRows}</table></div></details>` : '';
+
+  // Newest first; "slip" = how far the supposed end moved at that signal.
+  const ev = st.events || [];
+  const evRows = ev.map((e, i) => {
+    const prev = i > 0 ? ev[i-1] : null;
+    const slip = (prev && prev.end && e.end && prev.pdo === e.pdo) ? minsBetween(prev.end, e.end) : null;
+    const slipTxt = slip === null ? '' : (Math.abs(slip) < 1 ? '±0' : (slip > 0 ? `+${dur(slip)}` : dur(slip)));
+    return `<tr><td>${hm(e.t)}</td><td class="k-${esc(e.kind)}">${esc(KIND_LABEL[e.kind]||e.kind)}</td>
+      <td class="wrap">${esc(e.reason)}</td><td>${esc(e.pdo)}</td><td>${esc(e.rem)}</td><td>${esc(e.crew_n)}</td>
+      <td>${hm(e.end)}${e.estimate?' <span class="warn">est.</span>':''}</td><td>${slipTxt}</td></tr>`;
+  }).reverse().join('');
+  const evHtml = `<details ${st.state==='running'?'open':''}><summary>Signals today (${ev.length})</summary>
+      ${evRows ? `<div class="tw"><table><tr><th>At</th><th>Signal</th><th>Detail</th><th>PDO</th><th>Rem.</th><th>Crew</th>
+      <th>Supposed end</th><th>Slip</th></tr>${evRows}</table></div>` : '<div class="empty">none yet</div>'}</details>`;
+
+  return `<div class="card ${lc.late?'overdue':''}">
+    <div class="card-h"><span class="sid">${esc(st.id)}</span>
+      <span class="pill st-${esc(st.state)}">${esc(STATE_LABEL[st.state]||st.state)}</span>
+      <span class="pdo">${p ? `${esc(p.id)} · ${esc(p.part||'')} · ${esc(p.remaining)}/${esc(p.qty)} left · ${esc(p.min_per_unit)} min/unit` : ''}</span></div>
+    ${grid}
+    <div class="crew">${crewHtml}</div>
+    ${queueHtml}${evHtml}
+  </div>`;
+}
+
+function renderArea(area){
+  const d = DBG[area];
+  const label = AREA_LABEL[area] || area;
+  if (!d) return `<section><div class="area-h"><h2>${esc(label)}</h2><span class="bad">no ${esc(area)}_debug.js — board offline, on an older build, or in dev mode</span></div></section>`;
+  const age = d.__written ? (Date.now() - d.__written) / 1000 : null;
+  const stale = age !== null && age > STALE_SEC;
+  const grace = d.overdue_grace_min != null ? d.overdue_grace_min : 30;
+  const sched = (d.schedule||[]).map(s =>
+    `<span class="chip">${esc(s.shift)}${s.tier?` OT${s.tier}`:''} ${esc(s.window)} · breaks ${esc(s.breaks.join(', '))} · 5S ${s.five_s_min}m each end</span>`).join('');
+  const sts = (d.stations||[]).filter(s => showPaused ? true : s.state === 'running');
+  const nRun = (d.stations||[]).filter(s => s.state === 'running').length;
+  const nOther = (d.stations||[]).filter(s => s.pdo && s.state !== 'running').length;
+  return `<section>
+    <div class="area-h"><h2>${esc(label)}</h2>
+      <span class="muted">build ${esc(d.build)} · data ${esc(d.ts)}${age!==null?` (${Math.round(age)}s ago)`:''}</span>
+      ${stale?'<span class="bad">STALE — board not writing</span>':''}
+      ${d.dev_mode?'<span class="warn">DEV MODE</span>':''}
+      ${d.in_production===false?'<span class="warn">outside production hours</span>':''}
+      <span class="muted">${nRun} running · ${nOther} paused</span></div>
+    <div class="sched">${sched || '<span class="muted">no roster loaded</span>'}</div>
+    <div class="cards">${sts.length ? sts.map(s => renderStation(s, grace)).join('')
+      : `<div class="empty">${showPaused ? 'No stations.' : 'No running stations right now.'}</div>`}</div>
+  </section>`;
+}
+
+function render(){
+  renderAreaButtons();
+  const areas = HTTP ? Object.keys(DBG) : (areaFilter === 'ALL' ? AREA_ORDER : [areaFilter]);
+  // Keep open/closed <details> across the 15s re-render.
+  const open = new Set([...document.querySelectorAll('details[open]')].map(x => x.dataset.k));
+  const hadState = document.querySelectorAll('details').length > 0;
+  document.getElementById('main').innerHTML = areas.map(renderArea).join('') +
+    `<p class="note">Supposed end = block start + the work left at that moment, walked through producing time only:
+     each operator's own shift window, minus their scheduled breaks / meal and 5 min of 5S at each end of their shift.
+     A block starts at a <b>reset</b> (order placed/promoted/moved, crew back, shift change), a <b>scan</b>
+     (FG / WIP lowered the remaining qty — anchored at the scan's own time), or a <b>crew</b> change (work so far
+     carried over at the old crew's pace). <b>Slip</b> = how far that signal moved the supposed end.
+     "est." = the order runs past the current crew's shift, so the same headcount is assumed to carry on.</p>`;
+  document.querySelectorAll('details').forEach(el => {
+    const sec = el.closest('.card'), area = el.closest('section');
+    const k = (area ? area.querySelector('h2').textContent : '') + ':' +
+              (sec ? sec.querySelector('.sid').textContent : '') + ':' +
+              el.querySelector('summary').textContent.split(' ')[0];
+    el.dataset.k = k;
+    if (hadState) el.open = open.has(k);
+  });
+}
+
+function tick(){
+  document.getElementById('clock').textContent = new Date().toTimeString().slice(0,8);
+}
+
+// ── Data ─────────────────────────────────────────────────────────────────────
+const LOADER_BODY =
+  '<scr'+'ipt>window.NPV_DEBUG={};</scr'+'ipt>'+
+  AREA_ORDER.map(a => '<scr'+`ipt src="${a}_debug.js" onerror="void 0"></scr`+'ipt>').join('')+
+  '<scr'+'ipt>parent.postMessage({__npvdbg:1,data:window.NPV_DEBUG},"*");</scr'+'ipt>';
+
+async function refreshData(){
+  if (HTTP) {
+    try {
+      const r = await fetch('/api/debug', {cache: 'no-store'});
+      const d = await r.json();
+      if (d && d.area) { d.__written = Date.now(); DBG = {[d.area]: d}; render(); }
+    } catch (e) { console.warn('debug fetch failed', e); }
+  } else {
+    document.getElementById('loader').srcdoc = '<!--'+Date.now()+'-->'+LOADER_BODY;
+  }
+}
+window.addEventListener('message', e => {
+  if (e && e.data && e.data.__npvdbg) { DBG = e.data.data || {}; render(); }
+});
+document.getElementById('areaBtns').addEventListener('click', e => {
+  const a = e.target.closest('button'); if (!a) return;
+  areaFilter = a.dataset.a;
+  try { localStorage.setItem('tdbg_area', areaFilter); } catch(_) {}
+  render();
+});
+const sp = document.getElementById('showPaused');
+sp.checked = showPaused;
+sp.addEventListener('change', () => {
+  showPaused = sp.checked;
+  try { localStorage.setItem('tdbg_paused', showPaused ? '1' : '0'); } catch(_) {}
+  render();
+});
+
+tick(); refreshData();
+setInterval(tick, 1000);
+setInterval(refreshData, REFRESH_MS);
+setInterval(() => { if (Object.keys(DBG).length) render(); }, 30000);   // keep "time left" moving
+</script>
+</body>
+</html>

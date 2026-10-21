@@ -194,7 +194,7 @@ TARGET_EFFICIENCY = 0.95          # 95%
 SHIFTS = {
     "Ca 1": {
         "start": 6.0,     # 6:00 AM
-        "end": 14.333,     # 14:20
+        "end": 14.167,     # 14:10 (confirmed; was 14:20, which made Ca1 and Ca2 both count 14:10–14:20)
         "breaks_no_ot": [
             (8.0, 8.167),      # 8:00-8:10   (10 min)
             (10.5, 11.0),      # 10:30-11:00 (30 min)
@@ -211,8 +211,8 @@ SHIFTS = {
             (10.5, 11.167),     # 10:30-11:10 (40 min)
             (14.167, 14.667),   # 14:10-14:40 (30 min)
         ],
-        "ot2_end": 16.333,  # 16:20
-        "ot3_end": 17.333,  # 17:20
+        "ot2_end": 16.167,  # 16:10
+        "ot3_end": 17.167,  # 17:10
     },
     "Ca 2": {
         "start": 14.167,   # 14:10
@@ -229,7 +229,6 @@ SHIFTS = {
             (20.5, 20.667),     # 20:30-20:40
         ],
         "breaks_ot3": [
-            (14.167, 14.333),   # 14:10-14:20
             (14.167, 14.667),   # 14:10-14:40 (30 min)
             (17.167, 17.333),   # 17:10-17:20
             (19.0, 19.5),       # 19:00-19:30
@@ -890,7 +889,7 @@ def build_target_pace(target_hours, shift_hours=None):
     If shift_hours is provided (dict with "Ca 1", "Ca 2", "HC" keys),
     the pace line layers each shift's contribution during its active window,
     flattening during that shift's breaks. This means:
-      - Ca 1 hours only accumulate during 6:00-14:20 (minus Ca 1 breaks)
+      - Ca 1 hours only accumulate during 6:00-14:10 (minus Ca 1 breaks)
       - HC hours only accumulate during 8:00-16:30 (minus HC breaks)
       - Ca 2 hours only accumulate during 14:10-22:20 (minus Ca 2 breaks)
     

@@ -1,7 +1,7 @@
 # Production Control System — Full Handoff
 
-**Repo:** `Fonz0d1ac/Test` · **Branch:** `claude/production-control-board-157ift`
-**Build:** `2026.09.30.14` (`BUILD_VERSION` / `BUILD_NOTE` at the top of `app.py`, shown in the
+**Repo:** `Fonz0d1ac/Test` · **Branch:** `claude/production-control-board-157ift-ji7flw`
+**Build:** `2026.10.21.15` (`BUILD_VERSION` / `BUILD_NOTE` at the top of `app.py`, shown in the
 setup window and the first console line)
 **Site:** NPV (Northstar Precision Vietnam) — Packaging / Assembly / Raw Part
 
@@ -84,6 +84,8 @@ combined_dashboard.py         Big-screen app + aheadbehind_status.js writer
 shared_dashboard.html         Firewall-free station viewer (file://, reads *_status.js)
 shared_aheadbehind.html       Firewall-free Ahead/Behind (Chart.js INLINED)
 shared_rotator.html           Firewall-free rotator
+shared_debug.html             Timer debug screen (served at /debug; off the share = all 3 areas)
+tests/test_timer_calendar.py  Offline checks: break calendar, ETC anchors, pause reasons, debug feed
 stations_only.html            PK+RP wall board, fits 1920×1080 without scrolling
 bpt.py                        BPT pick-ticket engine + MainDatabase reader + A5 HTML render
 boxlabel.py                   Zebra box-label engine (ModeQty formulas, box split, stack/GW math)
@@ -148,10 +150,77 @@ FULL roster (each with `start`/`end`). **`_worker_available_now(w, now)` = `(sta
 `prune_expired_workers()`. `_active_worker_id_set()` = `start ≤ now ≤ end` (drives ETC).
 `NEXT_SHIFT_OPEN_EARLY_HRS = 15/60`.
 
-### 2g. ETC
-`calc_etc()` uses `remaining_qty`, `time_study`, ACTIVE worker count. Runs only 06:00–22:20 with
-≥1 active worker; outside production it FREEZES (`off_hours`); no active worker → PAUSED. Required
-hours are per SINGLE operator; ETC scales by actual operators. Shift-boundary resets in the 60s poll.
+### 2g. ETC — break-aware, anchored (build `.15`)
+Work content is per SINGLE operator (`finished_hrs / qty` × units); the ETC walks it forward
+through **producing time only** and divides by however many of the crew are producing at each
+minute. Replaced `calc_etc()` / `calc_queue_clear()`, which were wall-clock and had a second bug.
+
+**The calendar** (`worker_work_intervals`, `_crew_segments`, `walk_work`). Per OPERATOR, not per
+area: their own window (note segments for a half day / part-day lend) minus their
+`SHIFT_SCHEDULE[(shift, tier)]` breaks and **5 min of 5S at each end of their shift**. The tier
+comes from the roster (`_worker_tier`, same bucketing as `_worker_window`). Per operator because
+the schedules are not identical in every case — checked minute by minute:
+
+| Day | Ca1 vs Ca2 while both on the clock |
+|---|---|
+| no OT | never overlap (handover 14:10) |
+| OT 2h | **12:10–12:20 Ca1 on break, Ca2 working** (Ca2 starts 12:10, first break 14:10 — confirmed by the user). 14:10–14:20 shared. |
+| OT 3h | identical: Ca2 starts 11:10 right after Ca1's meal, 14:10–14:40 shared |
+| HC day | everyone is HC (Ca1/Ca2 do not split) — HC's own breaks |
+
+So on a 2h-OT day a mixed station slows to half pace at 12:15–12:20 rather than stopping. PFD
+(the 6% in `net_hours_for_windows`) is **not** applied — that is a capacity-planning allowance;
+the ETC's work content is the time study.
+
+**Past the crew's shift** the walk assumes the same headcount carries on through the normal
+pattern at the same tier (Ca1→Ca2→next morning, or HC→HC) and flags the result `estimate`
+(`etc_estimate` in the snapshot, "est." on the debug screen). `ETC_HORIZON_DAYS = 60`.
+
+**The anchor** (`timer_anchor`, `retime_timers`). The timer stores `anchor_at` + `anchor_ph`
+(person-hours left at that moment); ETC = `walk_work(anchor_at, anchor_ph, crew)`, so it is
+**fixed between signals**. The OLD ETC was `started_at + hours(LIVE remaining_qty)` — finished work
+counted twice (elapsed time AND a smaller remainder), so a station exactly on pace showed 00:00
+about half-way through an order. The anchor moves on three signals only, in write paths:
+- **reset** — `started_at` changed (placed / promoted / moved / crew back after no-worker / shift
+  change). Work = live remaining. `sync_timer_pause_state` and `reset_all_timers_for_new_shift`
+  tag a `reset_reason`; other sites replace the dict and read as "order started" / "timer reset".
+- **scan** — `remaining_qty` dropped (FG scan or WIP entry). Anchored at the newest SQL
+  `[Input time]` for that PO (split → parent) when it is newer than the anchor, else at the poll.
+  A rise (plan qty edit) is logged as `qty` and anchored at the poll.
+- **crew** — the station's operator list changed. Work done since the anchor is credited at the
+  **old** crew's pace (`work_done_between`), then the walk continues with the new crew. Re-anchored
+  inside `api_workers_assign` (while the stored crew is still the old one) and by the poll.
+
+`retime_timers` runs at the **end** of every 60s poll (after the shift reset and the worker prune)
+and inside `api_workers_assign`. Between a reset and the next poll, the snapshot falls back to
+`(started_at, live remaining)` — exactly what the poll will store.
+
+**Answer to "at shift change does it resume or restart?"** Neither: `reset_all_timers_for_new_shift`
+re-bases every station at 14:10 and 06:00 on the **scanned** remaining qty. The old countdown is
+dropped; the order does not restart from its full qty.
+
+**Pausing.** Running = in production hours **and** ≥1 active operator **and** ≥1 of them producing
+this minute. The snapshot's `timer.pause_reason` is `off_hours` | `break` | `5s` | `no_worker`;
+`board.html` labels it ("Paused — break" / "Tạm dừng — giờ nghỉ", "Paused — 5S"). The big screen and
+shared viewers already treat any `paused` as PAUSED (amber), so they now show PAUSED through breaks
+too — and guard #19 keeps a paused station from going OVERDUE.
+
+### 2g-debug. Timer debug screen (build `.15`)
+`shared_debug.html` — one file, read-only, two ways in:
+- **On a board PC:** server console → **⏱ Timer Debug** (or `http://127.0.0.1:5050/debug`). This
+  area only, via `/api/debug`. Works in dev mode.
+- **Remotely, all three areas:** open `\\npvshare\...\dashboard_status\shared_debug.html`. Each
+  board writes `{AREA}_debug.{json,js}` there every ~15s (`write_debug_status`, every
+  `DEBUG_WRITE_EVERY_N`-th dashboard write; **skipped in dev mode**, like the main feed). **Copy
+  `shared_debug.html` to the share once** — nothing deploys it automatically.
+
+Per running station (toggle shows paused/idle too): block start + signal, work at start, supposed
+end (break-aware, "est." when it runs past the crew's shift), live time left (OVERDUE after the
+grace), break minutes skipped inside the block, last reset, crew with shift/OT/window and whether
+each is producing, the queue chained behind it with each order's start/end, and **today's signal
+log** (`data/timer_log_{AREA}.json`, today only, 120 per station) with how far each signal moved
+the supposed end ("slip"). Today's break table per (shift, tier) on the roster is shown per area.
+`build_timer_debug()` builds it from `build_board_snapshot()` and is read-only like it.
 
 ### 2g-bis. Standard crew (`ops_qty`) and the `@x` card badge (build `.13`)
 `TimeStudy.Ops_Qty` → `p['ops_qty']` on every PDO (splits inherit it via `dict(parent_static)`),
@@ -591,8 +660,8 @@ Answered by assumption, stated out loud rather than left blocking:
     first. Never reorder those checks.
 18. **BPT double-print guard.** `bpt_printed` is False while a background job runs; the browser-tab
     fallback must also check `!d.bpt_job`, or the ticket prints twice.
-19. **A paused timer can never be overdue.** Off-hours / no-operator freezes the estimate; without
-    this check every station goes red overnight.
+19. **A paused timer can never be overdue.** Off-hours / no-operator / break / 5S freezes the
+    estimate; without this check every station goes red overnight.
 20. **A background print failure must never vanish.** If the Canon job fails after the operator has
     clicked OK, it re-opens as the persistent banner rather than a toast.
 21. **Silent-path readiness is resolved synchronously**, before the background job starts, so the
@@ -616,6 +685,13 @@ Answered by assumption, stated out loud rather than left blocking:
     removing a just-printed order records no suppression (`_record_lp_suppression` reads that
     cache, which only the 60s poll used to populate) and the next poll puts the order straight
     back. Fixes the race §7 flagged; the green `has_lp` badge now also appears immediately.
+29. **ETC anchors move only in write paths.** `retime_timers` runs in the 60s poll and
+    `api_workers_assign`; `build_board_snapshot` / `build_timer_debug` only read the anchor (guard
+    #1). The crew re-anchor must happen BEFORE the stored crew is overwritten, or the work done so
+    far is credited at the new crew's pace.
+30. **A timer with no anchor that is more than 5 min old is re-based at now**
+    (`RETIME_FRESH_RESET`). That can only be a timer left by a build before `.15`; anchoring it at
+    its old `started_at` against today's remaining is the exact double-count `.15` removed.
 
 ---
 
@@ -676,6 +752,7 @@ Answered by assumption, stated out loud rather than left blocking:
 | `.11` | **`SO-` work orders** alongside `PDO`; **20-minute scan grace** before OVERDUE, with the station card turning red — applied to the control board, wall board, big screen and shared viewer. |
 | `.14` | **`combined_dashboard.py` crash fix** — `[Earned hour]` is nvarchar; one non-numeric row in the 30-day window aborted `build_station_cycle_model` with SQL error 8114. `TRY_CAST` + a safe `_f()` on the Python side + a warning that names the bad values (§2l). |
 | `.13` | **OVERDUE grace 20 → 30 min** (`app.OVERDUE_GRACE_MIN` + the four fallbacks). **`@x` standard-crew badge back on every PDO card** — `TimeStudy.Ops_Qty`, which was already published in the snapshot and only missing from the UI. |
+| `.15` | **Break-aware ETC.** The station timer pauses for every break, meal and the 5 min of 5S at each shift end (per operator, from `SHIFT_SCHEDULE`), and is **anchored** at the last reset / FG-or-WIP scan / crew change — fixing the double-count that made an on-pace station hit 00:00 half-way through. "Paused — break / 5S" on the board. **Timer debug screen** (`/debug`, console button, `shared_debug.html` for all 3 areas) with today's signal log. `combined_dashboard.SHIFTS`: Ca1 ends 14:10/16:10/17:10 (was 14:20/16:20/17:20), Ca2 3h-OT duplicate break removed. |
 | `.12` | **Real License Plate mint** (`lp.py`): reuse-then-mint, `sp_getapplock` + read-back retry, `[License Plate]` INSERT **committed before printing**, per-area serial ranges (the hardcoded Packaging base is gone), `lp_mode` live/dummy switch per area **defaulting to dummy**, `_license_plate_cache` seeded at print time. |
 
 Also this session: `stations_only.html` reworked into a **two-area (PK + RP) wall board** with
@@ -697,6 +774,9 @@ plus a `scale()` backstop). All missing templates and shared viewers restored to
   `[License Plate]` (the macro proves it).
 - `DASHBOARD_STATUS_DIR`, `CAPACITY_FILES={'AD','PK','RP':…}`.
 - `PRODUCTION_START=6.0`, `CA1_END=14.167`, `PRODUCTION_END=22.333`, `NEXT_SHIFT_OPEN_EARLY_HRS=15/60`.
+- `SHIFT_SCHEDULE` (clock window + breaks per shift × OT tier) and `FIVE_S_MIN = 5` drive the ETC
+  calendar as well as capacity. `ETC_HORIZON_DAYS = 60`, `RETIME_FRESH_RESET = 5 min`,
+  `TIMER_LOG_MAX_PER_STATION = 120`, `DEBUG_WRITE_EVERY_N = 3` (debug feed every ~15s).
 - Printing: `_MAINDB_DEFAULT`, `_EMAIL_DEFAULT`, `_print_settings_defaults()` (zebra/canon/maindb/
   email/silent_bpt/sumatra_path/browser_path/pallet_prefixes/crate_prefixes/**`lp_mode`**) →
   `data/print_settings_{AREA}.json`. **`lp_mode` defaults to `'dummy'`** — see §5 and guard #12.
@@ -722,7 +802,8 @@ plus a `scale()` backstop). All missing templates and shared viewers restored to
   `DEFAULT_OVERDUE_GRACE_MIN = 30` (fallback only — the authoritative value comes from each board's
   snapshot), `PORT = 8080`.
 - Carries its **own** shift/break model (`SHIFTS`, `parse_capacity_file`) that overlaps `app.py`'s
-  capacity code but is not identical — aggregate capacity for the chart vs per-worker roster.
+  capacity code but is not identical. Its clock times were brought in line with `app.py` in `.15`
+  (Ca1 ends 14:10 / 16:10 / 17:10); only `end` and `breaks_no_ot` are actually read (pace line) — aggregate capacity for the chart vs per-worker roster.
   Check before assuming they can share a module.
 
 ---
@@ -811,7 +892,14 @@ decision to revisit.
 7. **`stations_only.html` sizing** was tuned at 1920×1080 with 12 stations per area. More stations
    still fit (row-proportional flex + `scale()` backstop) but cards shrink; check readability at
    viewing distance on the real wall screen.
-8. ⚠ **Headless `--window-size=1920,1080` reports a 993 px viewport**, which makes screenshots look
+8. **Ca1 no-OT start: 06:00 or 06:30?** In `.15` discussion the user wrote "no OT → 1st shift
+   works 6:30–14:10", but every table (`SHIFTS`, `SHIFT_SCHEDULE`, the published 6.73 h which needs
+   490 clock minutes) says 06:00. Left at 06:00 pending confirmation. If it really is 06:30, change
+   `SHIFT_SCHEDULE[('Ca 1', 0)]` and `SHIFTS['Ca 1']['start']` (and re-check the 6.73 h figure).
+9. **The ETC after a scan runs a little late by the scan lag** — the block is anchored at the scan
+   with the scanned remaining, so the half-finished box at the station isn't credited. The 30-min
+   OVERDUE grace absorbs it; the debug screen's "slip" column shows how big it is in practice.
+10. ⚠ **Headless `--window-size=1920,1080` reports a 993 px viewport**, which makes screenshots look
    like the layout has a gap at the bottom. It does not. Measure inside a frame that is genuinely
    1080 tall.
 
@@ -831,6 +919,9 @@ decision to revisit.
 - **Big screen:** `python combined_dashboard.py` → `http://<pc-ip>:8080/` (also starts the
   `aheadbehind_status.js` writer). **Restart it after editing any template.**
 - **Shared viewers:** open `\\npvshare\...\dashboard_status\shared_rotator.html`.
+- **Timer debug:** server console → **⏱ Timer Debug** (this area), or
+  `\\npvshare\...\dashboard_status\shared_debug.html` (all three — copy the file there once).
+- **Offline tests:** `python tests/test_timer_calendar.py` (needs flask + openpyxl; no SQL/Excel).
 
 ---
 
