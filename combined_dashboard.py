@@ -1529,6 +1529,43 @@ def capacity_only():
     return html
 
 
+# =============================================================================
+# KEEP AWAKE — folded in from the standalone keep_awake.py, so the big-screen PC
+# needs only this one program running. Nudges the mouse 1px right and back every
+# 9 minutes so Windows never sleeps, locks or blanks the wall screen. Windows-only;
+# anywhere else it just reports that it is off.
+# =============================================================================
+KEEP_AWAKE = True               # False to let the PC sleep normally
+KEEP_AWAKE_INTERVAL = 9 * 60    # seconds between nudges
+
+def _nudge_mouse():
+    """Move mouse 1px right then 1px back — barely noticeable."""
+    import ctypes
+    ctypes.windll.user32.mouse_event(0x0001, 1, 0, 0, 0)   # MOUSEEVENTF_MOVE +1px
+    time.sleep(0.1)
+    ctypes.windll.user32.mouse_event(0x0001, -1, 0, 0, 0)  # and back
+
+def _keep_awake_loop():
+    while True:
+        time.sleep(KEEP_AWAKE_INTERVAL)
+        try:
+            _nudge_mouse()
+            print(f"[keep awake] {time.strftime('%H:%M:%S')} nudged mouse to prevent sleep")
+        except Exception as e:
+            # A failed nudge must never take the dashboard down — log and keep trying.
+            print(f"[keep awake] nudge FAILED: {e}")
+
+def start_keep_awake():
+    if not KEEP_AWAKE:
+        print("[keep awake] off (KEEP_AWAKE = False)")
+        return
+    if os.name != "nt":
+        print("[keep awake] off — Windows only")
+        return
+    threading.Thread(target=_keep_awake_loop, daemon=True).start()
+    print(f"[keep awake] on — mouse nudge every {KEEP_AWAKE_INTERVAL // 60} min")
+
+
 PORT = 8080  # avoid Chrome-blocked ports (e.g. 5060); 8080 is safe
 
 if __name__ == "__main__":
@@ -1541,4 +1578,5 @@ if __name__ == "__main__":
     print(f"Open fullscreen     : http://<this-pc-ip>:{PORT}/   (auto-rotates every 1 min; pick a screen from the top-right selector)")
     print("=" * 60)
     start_aheadbehind_feed()   # publish aheadbehind_status.js to the share for the firewall-free shared viewer
+    start_keep_awake()         # replaces running keep_awake.py alongside
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)

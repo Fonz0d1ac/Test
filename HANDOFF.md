@@ -801,6 +801,9 @@ plus a `scale()` backstop). All missing templates and shared viewers restored to
 - Own `SQL_CONN_STR` (ODBC Driver 17), `CAPACITY_FILES`, `DASHBOARD_STATUS_DIR`,
   `DEFAULT_OVERDUE_GRACE_MIN = 30` (fallback only — the authoritative value comes from each board's
   snapshot), `PORT = 8080`.
+- `KEEP_AWAKE = True`, `KEEP_AWAKE_INTERVAL = 9*60` — the old standalone `keep_awake.py`, folded
+  in: a daemon thread nudges the mouse 1px and back every 9 min so the big-screen PC never sleeps
+  or locks. Windows-only; a failed nudge is logged, never fatal. No separate script to run anymore.
 - Carries its **own** shift/break model (`SHIFTS`, `parse_capacity_file`) that overlaps `app.py`'s
   capacity code but is not identical. Its clock times were brought in line with `app.py` in `.15`
   (Ca1 ends 14:10 / 16:10 / 17:10); only `end` and `breaks_no_ot` are actually read (pace line) — aggregate capacity for the chart vs per-worker roster.
@@ -915,7 +918,8 @@ decision to revisit.
   states which one every run used — a dummy and a real plate are the same 18 characters, so the
   label itself cannot tell you. **Boxes printed with a dummy plate must not be shipped or scanned.**
 - **Big screen:** `python combined_dashboard.py` → `http://<pc-ip>:8080/` (also starts the
-  `aheadbehind_status.js` writer). **Restart it after editing any template.**
+  `aheadbehind_status.js` writer and the keep-awake nudge — **do not also run `keep_awake.py`**).
+  **Restart it after editing any template.**
 - **Shared viewers:** open `\\npvshare\...\dashboard_status\shared_rotator.html`.
 - **Timer debug:** server console → **⏱ Timer Debug** (this area), or
   `\\npvshare\...\dashboard_status\shared_debug.html` (all three — copy the file there once).
