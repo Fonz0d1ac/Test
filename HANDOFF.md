@@ -164,7 +164,7 @@ the schedules are not identical in every case — checked minute by minute:
 | Day | Ca1 vs Ca2 while both on the clock |
 |---|---|
 | no OT | never overlap (handover 14:10) |
-| OT 2h | **12:10–12:20 Ca1 on break, Ca2 working** (Ca2 starts 12:10, first break 14:10 — confirmed by the user). 14:10–14:20 shared. |
+| OT 2h | **12:10–12:20 Ca1 on break, Ca2 working** (Ca2 starts 12:10, first break 14:10 — confirmed by the user). Ca2's opening 5S makes it 12:15 in the calendar; on the floor Ca2 really starts 12:15–12:20 after 5S + the start-of-shift group meeting, and the user accepted 12:10/12:15 as close enough. 14:10–14:20 shared. |
 | OT 3h | identical: Ca2 starts 11:10 right after Ca1's meal, 14:10–14:40 shared |
 | HC day | everyone is HC (Ca1/Ca2 do not split) — HC's own breaks |
 
@@ -892,10 +892,8 @@ decision to revisit.
 7. **`stations_only.html` sizing** was tuned at 1920×1080 with 12 stations per area. More stations
    still fit (row-proportional flex + `scale()` backstop) but cards shrink; check readability at
    viewing distance on the real wall screen.
-8. **Ca1 no-OT start: 06:00 or 06:30?** In `.15` discussion the user wrote "no OT → 1st shift
-   works 6:30–14:10", but every table (`SHIFTS`, `SHIFT_SCHEDULE`, the published 6.73 h which needs
-   490 clock minutes) says 06:00. Left at 06:00 pending confirmation. If it really is 06:30, change
-   `SHIFT_SCHEDULE[('Ca 1', 0)]` and `SHIFTS['Ca 1']['start']` (and re-check the 6.73 h figure).
+8. ~~**Ca1 no-OT start: 06:00 or 06:30?**~~ **Confirmed 06:00–14:10** (the "6:30" was a typo).
+   Nothing to change.
 9. **The ETC after a scan runs a little late by the scan lag** — the block is anchored at the scan
    with the scanned remaining, so the half-finished box at the station isn't credited. The 30-min
    OVERDUE grace absorbs it; the debug screen's "slip" column shows how big it is in practice.
